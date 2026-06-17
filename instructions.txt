@@ -1,0 +1,16 @@
+TEST NAME: Google search Smoke TEST
+
+GOAL: Open Google and Search Oracle Fusion
+
+STEPS:
+1. Open Google
+2. Search in search bar for Oracle Fusion
+3. Wait for results
+4. Report First Page Title
+5. Stop
+
+GUARDRAILS:
+- Do NOT log in anywhere
+- Do NOT click any ads
+- Do NOT download files
+- Stop after reporting title
