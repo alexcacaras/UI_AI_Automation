@@ -13,9 +13,10 @@ def perceive(page):
             }
 
             function getName(el) {
-                // direct label sources first
+                // 1. direct attributes
                 let name = el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('placeholder') || '';
-                // aria-labelledby: the label text lives in ANOTHER element, referenced by id
+
+                // 2. aria-labelledby: label text lives in another element, referenced by id
                 if (!name) {
                     const labelledBy = el.getAttribute('aria-labelledby');
                     if (labelledBy) {
@@ -23,14 +24,48 @@ def perceive(page):
                         if (labelEl) name = labelEl.innerText || labelEl.textContent || '';
                     }
                 }
-                // Oracle oj- pattern: input id ends in "|input", its label/hint ends in "|hint"
+
+                // 3. STANDARD HTML: <label for="thisId"> — the universal mechanism
+                if (!name && el.id) {
+                    const forLabel = document.querySelector('label[for="' + CSS.escape(el.id) + '"]');
+                    if (forLabel) name = forLabel.innerText || forLabel.textContent || '';
+                }
+
+                // 4. STANDARD HTML: an enclosing <label> ancestor wrapping the input
+                if (!name) {
+                    const wrapLabel = el.closest('label');
+                    if (wrapLabel) name = wrapLabel.innerText || wrapLabel.textContent || '';
+                }
+
+                // 5. Oracle oj- fallback: input id ends "|input", label/hint ends "|hint" or "|label"
                 if (!name && el.id && el.id.endsWith('|input')) {
-                    const hintId = el.id.slice(0, -6) + '|hint';   // swap trailing "|input" for "|hint"
-                    const hintEl = document.getElementById(hintId);
+                    const base = el.id.slice(0, -6);
+                    const hintEl = document.getElementById(base + '|hint') || document.getElementById(base + '|label');
                     if (hintEl) name = hintEl.innerText || hintEl.textContent || '';
                 }
-                // fall back to the element's own visible text
+
+                // 6. PROXIMITY (last resort): unlabeled input -> label/text directly above it.
+                //    Oracle drawer comboboxes link their label to the OPEN filter-input, leaving the
+                //    collapsed input nameless. Only cue is the label sitting just above the box.
+                if (!name) {
+                    const r = el.getBoundingClientRect();
+                    let best = null, bestGap = 60;
+                    document.querySelectorAll('label, span').forEach(cand => {
+                        const t = (cand.innerText || cand.textContent || '').trim();
+                        if (!t || t.length > 40 || cand.children.length > 0) return;
+                        const cr = cand.getBoundingClientRect();
+                        const above = r.top - cr.bottom;
+                        const alignedX = Math.abs(cr.left - r.left) < 40;
+                        if (above >= 0 && above < bestGap && alignedX) {
+                            best = t; bestGap = above;
+                        }
+                    });
+                    if (best) name = best;
+                }
+
+                // 7. last resort: the element's own visible text
                 if (!name) name = el.innerText || '';
+
                 return name.trim();
             }
                                  
