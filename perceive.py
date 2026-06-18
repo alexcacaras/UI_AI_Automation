@@ -23,6 +23,12 @@ def perceive(page):
                         if (labelEl) name = labelEl.innerText || labelEl.textContent || '';
                     }
                 }
+                // Oracle oj- pattern: input id ends in "|input", its label/hint ends in "|hint"
+                if (!name && el.id && el.id.endsWith('|input')) {
+                    const hintId = el.id.slice(0, -6) + '|hint';   // swap trailing "|input" for "|hint"
+                    const hintEl = document.getElementById(hintId);
+                    if (hintEl) name = hintEl.innerText || hintEl.textContent || '';
+                }
                 // fall back to the element's own visible text
                 if (!name) name = el.innerText || '';
                 return name.trim();
@@ -66,13 +72,21 @@ def perceive(page):
     """)
         return elements
 def click(page, index):
-    page.locator(f'[data-ai-index="{index}"]').click()
+    locator = page.locator(f'[data-ai-index="{index}"]')
+    tag = locator.evaluate("el => el.tagName.toLowerCase()")
+    if tag in ("input", "textarea", "select"):
+        locator.focus()      # inputs: focus dodges the hint-overlay intercept
+    else:
+        locator.click()
 
 def run_loop(page):
      done = False
      while not done:
         page.wait_for_load_state("domcontentloaded")
-        page.wait_for_timeout(1000)
+        try:
+            page.wait_for_load_state("networkidle", timeout=10000)
+        except:
+            pass    # some Oracle pages never fully idle — don't hang, just proceed
         elements = []
         for attempt in range(5):
             page.wait_for_timeout(2000)
@@ -104,11 +118,11 @@ def run_loop(page):
             elif cmd.startswith("type "):
                 parts = cmd.split(maxsplit=2)
                 index = int(parts[1])
-                text = parts[2]                      # always set text first
+                text = parts[2]
                 press_enter = text.endswith(" Enter")
                 if press_enter:
-                    text = text[:-6]                 # strip the trailing " Enter"
-                click(page, index)
+                    text = text[:-6]
+                page.locator(f'[data-ai-index="{index}"]').focus()   # focus, not click
                 page.keyboard.type(text)
                 if press_enter:
                     page.keyboard.press("Enter")
