@@ -114,12 +114,32 @@ def click(page, index):
     else:
         locator.click()
 
+def fill_by_name(page, name, value):
+    try:
+        
+        loc = page.get_by_role("combobox", name=name)
+        if loc.count() == 0:
+            loc = page.get_by_role("textbox", name=name)
+        if loc.count() == 0:
+            print(f"no field named '{name}' found")
+            return
+        loc = loc.first              
+        loc.focus()
+        loc.press("ControlOrMeta+a")
+        loc.fill(value)
+        page.wait_for_timeout(1000)
+        loc.press("Enter")
+        print(f"filled '{name}' = '{value}'")
+    except Exception as e:
+        print(f"fill failed: {e}")
+
+
 def run_loop(page):
      done = False
      while not done:
         page.wait_for_load_state("domcontentloaded")
         try:
-            page.wait_for_load_state("networkidle", timeout=10000)
+            page.wait_for_load_state("networkidle", timeout=13000)
         except:
             pass    # some Oracle pages never fully idle — don't hang, just proceed
         elements = []
@@ -137,7 +157,7 @@ def run_loop(page):
         print("\n--- PAGE NOW ---")
         for el in elements:
             print(el)
-        cmd = input("\naction? (click N / type N text / nav URL / press N / wait / done):").strip()
+        cmd = input("\naction? (click N / type N text / nav URL / press N / wait / fill / done):").strip()
         #goal = "Navigate to My Client Groups and search for an employee"
         #ai_cmd = ask_llm(elements, goal).strip()
         #print(f"\n AI wants to:{ai_cmd}")
@@ -161,16 +181,26 @@ def run_loop(page):
                 page.keyboard.type(text)
                 if press_enter:
                     page.keyboard.press("Enter")
+            elif cmd.startswith("fill "):
+                rest = cmd.split(maxsplit=1)[1]                       
+                if "|" not in rest:
+                    print("usage: fill <field name> | <value>")
+                else:
+                    name, value = rest.split("|", 1)
+                    fill_by_name(page, name.strip().strip('\'"'), value.strip().strip('\'"'))
             elif cmd.startswith("nav "):
                 url = cmd.split(maxsplit=1)[1]
                 page.goto(url)
             elif cmd.startswith("press "):
-                key = cmd.split(maxsplit=1)[1]
-                page.keyboard.press(key)
+                parts = cmd.split()
+                key = parts[1]
+                count = int(parts[2]) if len(parts) > 2 else 1   
+                for _ in range(count):
+                    page.keyboard.press(key)
             elif cmd == "wait":
                 page.wait_for_timeout(3000)
             else:
-                print("didnt understand that - try: click 9 / type 9 hello / nav http://... / press Enter / wait / done")
+                print("didnt understand that - try: click 9 / type 9 hello / nav http://... / press Enter / wait / fill / done")
         except Exception as e:
             print(f"action failed {e}")
 

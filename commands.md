@@ -6,15 +6,25 @@
 
 4. nav URL -> nav is to navigate to the URL that is needed to go to, replace URL with the url you need to go to
 
-5. press KEY -> presses a keyboard key on whatever is currently focused (no index). 
+5. 5. press KEY -> presses a keyboard key on whatever is currently focused (no index). 
    Capitalize key names. Examples: press Enter, press Escape, press Control+A
    (Tip: click or type into a field first to focus it, THEN press on the next command.)
+   Optionally add a number to repeat the press, e.g. press PageDown 3 presses
+   PageDown three times. Most useful for scrolling (PageDown / PageUp).
 
     List of commands KEY could be:
-    KEY: Enter, Escape, Tab, Backspace, Control+A, Control+C, Control+V, ArrowDown, ArrowUp, ArrowLeft, ArrowRight, PageDown, PageUp, Control+F?
+    KEY: Enter, Escape, Tab, Backspace, Control+A, Control+C, Control+V, ArrowDown, ArrowUp, ArrowLeft, ArrowRight, PageDown, PageUp
 
 6. done -> done finishes the loop and the run 
 
 
 7. wait -> pauses ~3 seconds then re-perceives. Use when the page looks half-loaded 
    or when no useful option appears yet (Redwood still rendering).
+
+8. fill <field name> | <value> -> Fill a form field BY ITS NAME (not index).
+   Use for text boxes and dropdowns. The field name is the "name" in the element
+   list. Separate name and value with a pipe | . Quotes around the name are optional (both work).
+   For dropdowns, fill auto-selects the matching option — no separate press Enter needed.
+   Examples:
+     fill Department | Mathematics
+     fill What's the reason for this request? | New Position
