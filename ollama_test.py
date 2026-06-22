@@ -1,13 +1,17 @@
 import requests
 
 
-def ask_llm(elements, goal):
+def ask_llm(elements, goal, recent_history):
     with open("commands.md", "r", encoding="utf-8") as f:
         commands_doc = f.read()
 
     element_text = ""
     for el in elements:
         element_text += f"{el['index']}: {el['tag']} \"{el['name']}\"\n"
+
+    history_text = ""
+    for entry in recent_history:
+        history_text += f"- {entry['cmd'] } ->  {entry['result'] }\n"
 
     prompt = f"""You are controlling a web browser to accomplish a goal.
 
@@ -16,8 +20,13 @@ GOAL: {goal}
 Here are the actionable elements on the current page (index: tag "name"):
 {element_text}
 
+Recent actions you already tried (do NOT repeat ones that failed or caused no change):
+{history_text}
+
 Here are the commands you can use and how they work:
 {commands_doc}
+
+
 
 Respond with EXACTLY ONE action, nothing else.
 
@@ -44,6 +53,6 @@ if __name__ == "__main__":
         {"index": 5, "tag": "a", "name": "Settings and Actions"},
     ]
 
-    answer = ask_llm(fake_elements, "Click on My Client Groups")
+    answer = ask_llm(fake_elements, "Click on My Client Groups", [])
     print("AI said:")
     print(answer)

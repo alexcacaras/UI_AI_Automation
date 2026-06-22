@@ -173,7 +173,7 @@ def run_loop(page):
         previous_elements = elements
         #cmd = input("\naction? (click N / type N text / nav URL / press N / wait / fill / done):").strip()
         goal = "Open the Navigator and go to My Client Groups and then go to workforce structures"
-        ai_cmd = ask_llm(elements, goal).strip()
+        ai_cmd = ask_llm(elements, goal, history[-5:]).strip()
         print(f"\n AI wants to:{ai_cmd}")
         cmd = input("Press Enter to run it, or type your own command to override: ").strip()
         if cmd == "":
@@ -219,7 +219,7 @@ def run_loop(page):
             print("recent:", history[-5:])
         except Exception as e:
             print(f"action failed {e}")
-            history.append({"cmd": cmd, "result": f"error: {e}"})
+            history.append({"cmd": cmd, "result": f"error: {str(e).splitlines()[0]}"})
             print("recent:", history[-5:])
 
 with sync_playwright() as p:
