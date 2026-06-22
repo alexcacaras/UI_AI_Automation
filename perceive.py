@@ -133,9 +133,18 @@ def fill_by_name(page, name, value):
     except Exception as e:
         print(f"fill failed: {e}")
 
+def did_change(before, after):
+    before_ids = {el["id"] for el in before}
+    after_ids  = {el["id"] for el in after}
+    if before_ids == after_ids:
+        return "no change"
+    else:
+        return "changed"
 
 def run_loop(page):
      done = False
+     history = []
+     previous_elements = None
      while not done:
         page.wait_for_load_state("domcontentloaded")
         try:
@@ -157,13 +166,18 @@ def run_loop(page):
         print("\n--- PAGE NOW ---")
         for el in elements:
             print(el)
-        cmd = input("\naction? (click N / type N text / nav URL / press N / wait / fill / done):").strip()
-        #goal = "Navigate to My Client Groups and search for an employee"
-        #ai_cmd = ask_llm(elements, goal).strip()
-        #print(f"\n AI wants to:{ai_cmd}")
-        #cmd = input("Press Enter to run it, or type your own command to override: ").strip()
-        #if cmd == "":
-            #cmd = ai_cmd
+        if previous_elements is not None and history:
+            verdict = did_change(previous_elements, elements)
+            if history[-1]["result"] == "pending":
+                history[-1]["result"] = verdict
+        previous_elements = elements
+        #cmd = input("\naction? (click N / type N text / nav URL / press N / wait / fill / done):").strip()
+        goal = "Open the Navigator and go to My Client Groups and then go to workforce structures"
+        ai_cmd = ask_llm(elements, goal).strip()
+        print(f"\n AI wants to:{ai_cmd}")
+        cmd = input("Press Enter to run it, or type your own command to override: ").strip()
+        if cmd == "":
+            cmd = ai_cmd
         try:
             if cmd == "done":
                 done = True
@@ -201,8 +215,12 @@ def run_loop(page):
                 page.wait_for_timeout(3000)
             else:
                 print("didnt understand that - try: click 9 / type 9 hello / nav http://... / press Enter / wait / fill / done")
+            history.append({"cmd": cmd, "result": "pending"})
+            print("recent:", history[-5:])
         except Exception as e:
             print(f"action failed {e}")
+            history.append({"cmd": cmd, "result": f"error: {e}"})
+            print("recent:", history[-5:])
 
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=False, args=["--start-maximized"])
