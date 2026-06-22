@@ -82,16 +82,25 @@ testing: (1) .focus() not .click() to dodge the |hint overlay intercept;
 populates before Enter commits it (race condition). Works standalone on comboboxes,
 finds by name even when collapsed. Without this, forms are human- but not AI-drivable.
 
-### 3.3 — Action history (NEXT — highest value)
-Keep a short list of the last N (command, result) pairs and put it in the prompt.
-Fixes the #1 observed failure: the AI re-clicking the same stuck element forever
-because each decision is currently stateless. "You already tried click 18 twice,
-it failed" lets it try something else.
+### 3.3 — Action history  DONE
+Last N (command, result) pairs fed into the ask_llm prompt so each decision
+sees what came before. Result is computed by did_change(before, after) — set
+comparison of element ids (ignores Oracle renumbering) — giving "changed" /
+"no change" / "error: ...". Verdict is back-patched onto the prior history
+entry one loop later (results are only knowable on the next perceive). Entries
+are dicts {cmd, result}; errors store first line only. PROVEN on live Oracle:
+after a caret click errored, the AI stopped re-picking it and chose a different
+action. N=5, error text truncated to one line.
 
-### 3.4 — Stop condition / done detection
-Give the AI a clear success criterion in the goal ("you are done when the search
-results table appears") and rely on history so it can recognize completion and
-emit `done` instead of running forever.
+### 3.4 — Stop condition / done detection  DONE
+Success criterion baked into the goal string, phrased as observable page
+evidence ("you are done when you see Positions / Request a New Position" — names
+that actually appear in the element list at the destination, not abstract
+intent). The AI matches the criterion against the perceived elements and emits
+`done` itself. PROVEN on live Oracle: drove Navigator → Show More → Workforce
+Structures → recognized the Positions page → emitted done unprompted, no human
+overrides. Per-task criterion (not universal); moves to its own field when
+Phase 9 instruction-sets carry goal+criterion as data.
 
 ### 3.5 — Output parsing / cleanup
 Strip any `<think>…</think>` reasoning and stray text so only the bare command
@@ -107,7 +116,17 @@ click more robust against overlays. (May fold into Phase 1 settle-gate work.)
 Make the model name an env var so qwen3:14b / mistral-small / phi4 / qwen2.5-coder
 can be A/B tested for speed and accuracy without code changes.
 
-### Phase 3 exit criteria
-The AI, given a goal + history, drives a multi-step real-Oracle flow end to end
-with NO human overrides, recognizes when it's done, and doesn't loop on stuck
-elements. (Login still handled deterministically beforehand.)
+### Phase 3 exit criteria — MET (core)
+Proven in one run: AI drove Navigator → Workforce Structures → Positions end to
+end, no overrides (criteria 1), escaped the caret dead-ends via history instead
+of looping (criteria 3), and emitted `done` on recognizing the destination
+(criteria 2). Remaining 3.5 / 3.6 / 3.7 are refinements, not blockers.
+
+
+PARKED (observed during 3.3/3.4 runs): the AI still *picks* carets (the
+"Expand ..." nvgcil links) before history bounces it off — reactive, not
+proactive, and each wrong pick costs a ~30s timeout. Proactive fix: a prompt
+rule ("Navigator 'Expand ...' links often do nothing; prefer the named item or
+Show More") so it avoids them up front. Belongs with 3.5 prompt tuning or folds
+into Phase 9 instruction-sets. Also: click overlay-fix (focus-fallback on links)
+still parked — would mask silent no-ops, so deferred deliberately.
