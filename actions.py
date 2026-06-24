@@ -35,3 +35,9 @@ def did_change(before, after):
         return "no change"
     else:
         return "changed"
+    
+def search_element(elements, target):
+    for el in elements:
+        if el["index"] == target:
+            return el
+    return None

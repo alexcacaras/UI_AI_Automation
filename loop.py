@@ -1,7 +1,8 @@
-from playwright.sync_api import sync_playwright
 from perceive import perceive
 from actions import click, fill_by_name, did_change
 from llm import ask_llm
+from actions import search_element
+import json
 
 #loop file
 
@@ -10,6 +11,8 @@ def run_loop(page):
      done = False
      history = []
      previous_elements = None
+     recording = []
+     pending_step = None
      while not done:
         page.wait_for_load_state("domcontentloaded")
         try:
@@ -35,6 +38,11 @@ def run_loop(page):
             verdict = did_change(previous_elements, elements)
             if history[-1]["result"] == "pending":
                 history[-1]["result"] = verdict
+            if pending_step is not None:
+                if verdict == "changed":
+                    recording.append(pending_step)
+                pending_step = None
+
         previous_elements = elements
         #cmd = input("\naction? (click N / type N text / nav URL / press N / wait / fill / done):").strip()
         goal = "Open the Navigator and go to My Client Groups and then go to Workforce Structures. You are done when the page shows Workforce Structures items like 'Positions', 'Jobs', and 'Request a New Position' — when you see those, respond with: done"
@@ -51,6 +59,8 @@ def run_loop(page):
             elif cmd.startswith("click "):
                 index = int(cmd.split()[1])
                 click(page, index)
+                el = search_element(elements, index)
+                pending_step = {"action": "click", "id": el["id"], "name": el["name"], "role": el["role"], "tag": el["tag"]}
             elif cmd.startswith("type "):
                 parts = cmd.split(maxsplit=2)
                 index = int(parts[1])
@@ -88,3 +98,6 @@ def run_loop(page):
             print(f"action failed {e}")
             history.append({"cmd": cmd, "result": f"error: {str(e).splitlines()[0]}"})
             print("recent:", history[-5:])
+     with open("recording.json", "w") as f:
+         json.dump(recording, f, indent=2)
+     print(f"saved {len(recording)} steps to recording.json")

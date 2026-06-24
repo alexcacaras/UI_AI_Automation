@@ -1,0 +1,23 @@
+[
+  {
+    "action": "click",
+    "id": "pt1:_UISmmLink",
+    "name": "Navigator",
+    "role": "",
+    "tag": "a"
+  },
+  {
+    "action": "click",
+    "id": "pt1:_UISnvr:0:nvgpgl2_groupNode_workforce_management",
+    "name": "My Client Groups",
+    "role": "",
+    "tag": "div"
+  },
+  {
+    "action": "click",
+    "id": "pt1:_UISnvr:0:nv_itemNode_workforce_management_workforce_structures",
+    "name": "Workforce Structures",
+    "role": "",
+    "tag": "a"
+  }
+]
