@@ -102,20 +102,37 @@ Structures → recognized the Positions page → emitted done unprompted, no hum
 overrides. Per-task criterion (not universal); moves to its own field when
 Phase 9 instruction-sets carry goal+criterion as data.
 
-### 3.5 — Output parsing / cleanup
-Strip any `<think>…</think>` reasoning and stray text so only the bare command
-reaches the parser. Handle the AI returning junk gracefully (ask again / skip).
+### 3.5 — Output parsing / cleanup  DEFERRED (justified, not yet built)
+Strip <think>/explanation text so only a bare command reaches the parser.
+NOT needed for the chosen default (gemma4:e4b) or qwen3:14b — both emit clean
+bare commands. But the model A/B PROVED it's real: granite4.1 and phi4:14b
+bled explanation text into the command ("click 11\n\n(Explanation: ...)"),
+polluting history, and phi4/deepseek sometimes returned pure prose that hit
+"didnt understand that". So: build this ONLY if switching to a rambling model;
+with gemma as default it's unnecessary. Cleanup target = take the first token /
+first matching-command line, discard the rest.
 
-### 3.6 — Overlay / intercept handling
-Observed: Navigator flyout elements get stamped but are covered by an overlay
-(`intercepts pointer events`), so clicks time out and the AI loops. Investigate
-manually (drive Navigator by hand), then decide: prefer home-page tiles, or make
-click more robust against overlays. (May fold into Phase 1 settle-gate work.)
+### 3.6 — Overlay / intercept handling  RESOLVED (conclusion changed)
+Original plan (make click survive the overlay) was REJECTED: a focus-fallback
+would mask silent no-ops, hiding real failures. Actual resolution is two-part
+and DONE: (1) reactive — action history (3.3) bounces the AI off carets after
+they error; (2) proactive — a prompt rule in llm.py ("Navigator 'Expand ...'
+links do nothing; click the plain section name") reduces caret picks up front.
+Soft guardrail (prompt) + reactive recovery (history) stack. The click-overlay
+code-fix stays parked deliberately.
 
-### 3.7 — Model swap via env
-Make the model name an env var so qwen3:14b / mistral-small / phi4 / qwen2.5-coder
-can be A/B tested for speed and accuracy without code changes.
-
+### 3.7 — Model swap via env  DONE
+Model name read from .env via python-dotenv (os.getenv("MODEL", "qwen3:14b")
+default). Swap models with one line, no code change. A/B tested on the live
+Navigator→Workforce Structures goal:
+- gemma4:e4b — fast (4B!) + cleanest run → CHOSEN DEFAULT
+- qwen3:14b — perfect but slow
+- granite4.1:8b — fast/good, explanation-bleed into cmd, perceive-timing stumble
+- qwen2.5-coder:7b — fast, made up commands (click:click)
+- phi4 / deepseek-r1 / mistral-small / coder:14b — slower and/or rambled/looped
+KEY FINDING: winners win on instruction-following discipline, NOT Oracle
+knowledge (a 4B beat the 14Bs). So fine-tuning on Oracle is the WRONG lever —
+RAG (Phase 9) supplies path knowledge at runtime instead.
 ### Phase 3 exit criteria — MET (core)
 Proven in one run: AI drove Navigator → Workforce Structures → Positions end to
 end, no overrides (criteria 1), escaped the caret dead-ends via history instead
@@ -130,3 +147,20 @@ rule ("Navigator 'Expand ...' links often do nothing; prefer the named item or
 Show More") so it avoids them up front. Belongs with 3.5 prompt tuning or folds
 into Phase 9 instruction-sets. Also: click overlay-fix (focus-fallback on links)
 still parked — would mask silent no-ops, so deferred deliberately.
+
+
+### NAV GUARDRAIL  DONE (built during 3.5 work)
+The AI hallucinated placeholder URLs (nav https://example.com/...) when stuck.
+Fix in loop.py: after ask_llm returns, if the AI's command startswith "nav",
+rewrite it to the known base URL before running. Hard guardrail (code-enforced,
+not prompt advice). Human "nav <url>" override still works — only the AI's nav
+is rewritten. Base URL currently hardcoded in two places (loop.py + main.py);
+unifies when base_url moves to ClientConfig (parked Phase 0 work).
+
+PARKED (surfaced in model A/B): done-detection's real weakness is PERCEPTION
+TIMING on the destination page, not criterion wording — granite reached the goal
+but perceive caught a stale/empty page ("page looks empty (1 elements)"), so the
+done-evidence wasn't seen. Same crude 3s settle-gate issue noted in Phase 2.
+Fix lives in the proper settle gate (spinner/glass-pane/oj-complete), not here.
+Also parked: perceive's indexed overlays as clickable human-recording targets —
+a Phase 4 recording idea.

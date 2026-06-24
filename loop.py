@@ -1,7 +1,7 @@
 from playwright.sync_api import sync_playwright
 from perceive import perceive
 from actions import click, fill_by_name, did_change
-from ollama_test import ask_llm
+from llm import ask_llm
 
 #loop file
 
@@ -39,6 +39,8 @@ def run_loop(page):
         #cmd = input("\naction? (click N / type N text / nav URL / press N / wait / fill / done):").strip()
         goal = "Open the Navigator and go to My Client Groups and then go to Workforce Structures. You are done when the page shows Workforce Structures items like 'Positions', 'Jobs', and 'Request a New Position' — when you see those, respond with: done"
         ai_cmd = ask_llm(elements, goal, history[-5:]).strip()
+        if ai_cmd.startswith("nav"):
+            ai_cmd = "nav https://fa-euum-test-saasfaprod1.fa.ocs.oraclecloud.com"
         print(f"\n AI wants to:{ai_cmd}")
         cmd = input("Press Enter to run it, or type your own command to override: ").strip()
         if cmd == "":
