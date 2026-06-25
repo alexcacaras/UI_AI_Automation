@@ -39,7 +39,14 @@ def run_loop(page):
             if history[-1]["result"] == "pending":
                 history[-1]["result"] = verdict
             if pending_step is not None:
-                if verdict == "changed":
+                if pending_step["action"] == "click":
+                    if verdict == "changed":
+                        recording.append(pending_step)
+                elif pending_step["action"] == "press":
+                    recording.append(pending_step)
+                elif pending_step["action"] == "type":
+                    recording.append(pending_step)
+                elif pending_step["action"] == "fill":
                     recording.append(pending_step)
                 pending_step = None
 
@@ -61,6 +68,7 @@ def run_loop(page):
                 click(page, index)
                 el = search_element(elements, index)
                 pending_step = {"action": "click", "id": el["id"], "name": el["name"], "role": el["role"], "tag": el["tag"]}
+
             elif cmd.startswith("type "):
                 parts = cmd.split(maxsplit=2)
                 index = int(parts[1])
@@ -68,26 +76,37 @@ def run_loop(page):
                 press_enter = text.endswith(" Enter")
                 if press_enter:
                     text = text[:-6]
-                page.locator(f'[data-ai-index="{index}"]').focus()   # focus, not click
+                page.locator(f'[data-ai-index="{index}"]').focus()
                 page.keyboard.type(text)
                 if press_enter:
                     page.keyboard.press("Enter")
+                el = search_element(elements, index)
+                pending_step = {"action": "type", "id": el["id"], "name": el["name"], "role": el["role"], "tag": el["tag"], "value": text, "enter": press_enter}
+
             elif cmd.startswith("fill "):
                 rest = cmd.split(maxsplit=1)[1]                       
                 if "|" not in rest:
                     print("usage: fill <field name> | <value>")
                 else:
                     name, value = rest.split("|", 1)
-                    fill_by_name(page, name.strip().strip('\'"'), value.strip().strip('\'"'))
+                    name = name.strip().strip('\'"')
+                    value = value.strip().strip('\'"')
+                    fill_by_name(page, name, value)
+                    #fill_by_name(page, name.strip().strip('\'"'), value.strip().strip('\'"'))
+                    pending_step = {"action": "fill", "name": name, "value": value}
+
             elif cmd.startswith("nav "):
                 url = cmd.split(maxsplit=1)[1]
                 page.goto(url)
+
             elif cmd.startswith("press "):
                 parts = cmd.split()
                 key = parts[1]
                 count = int(parts[2]) if len(parts) > 2 else 1   
                 for _ in range(count):
                     page.keyboard.press(key)
+                pending_step = {"action": "press", "value": key}
+
             elif cmd == "wait":
                 page.wait_for_timeout(3000)
             else:
@@ -98,6 +117,7 @@ def run_loop(page):
             print(f"action failed {e}")
             history.append({"cmd": cmd, "result": f"error: {str(e).splitlines()[0]}"})
             print("recent:", history[-5:])
+
      with open("recording.json", "w") as f:
          json.dump(recording, f, indent=2)
      print(f"saved {len(recording)} steps to recording.json")
