@@ -41,3 +41,9 @@ def search_element(elements, target):
         if el["index"] == target:
             return el
     return None
+
+def find_by_id(elements, target_id):
+    for el in elements:
+        if el["id"] == target_id:
+            return el
+    return None
