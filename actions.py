@@ -29,9 +29,9 @@ def fill_by_name(page, name, value):
         print(f"fill failed: {e}")
 
 def did_change(before, after):
-    before_ids = {el["id"] for el in before}
-    after_ids  = {el["id"] for el in after}
-    if before_ids == after_ids:
+    before_sig = {(el["id"], el["name"]) for el in before}
+    after_sig  = {(el["id"], el["name"]) for el in after}
+    if before_sig == after_sig:
         return "no change"
     else:
         return "changed"
@@ -45,5 +45,11 @@ def search_element(elements, target):
 def find_by_id(elements, target_id):
     for el in elements:
         if el["id"] == target_id:
+            return el
+    return None
+
+def find_by_name(elements, target_name, target_tag):
+    for el in elements:
+        if el["name"] == target_name and el["tag"] == target_tag:
             return el
     return None

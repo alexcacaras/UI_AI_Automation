@@ -1,7 +1,6 @@
 import json
 from perceive import perceive
-from actions import find_by_id, click
-
+from actions import find_by_id, click, fill_by_name, find_by_name
 
 
 def replay(page):
@@ -28,11 +27,39 @@ def replay(page):
                 break
             print(f"page looks empty ({len(elements)} elements), waiting...")
 
-        el = find_by_id(elements, step["id"])
-        if el is None:
-            print(f"couldn't find {step['name']}, stopping")
-            break
+        action = step["action"]
+        print(f"replaying: {action} {step.get('name', step.get('value', ''))}")
 
-        print(f"replaying: {step['action']} {step['name']}")
-        click(page, el["index"])
+        if action in ("click", "type"):
+            el = None
+            for attempt in range(5):
+                elements = perceive(page)
+                if step["id"]:
+                    el = find_by_id(elements, step["id"])
+                else:
+                    el = find_by_name(elements, step["name"], step["tag"])
+                if el is not None:
+                    break
+                print(f"'{step['name']}' not found yet, re-perceiving...")
+                page.wait_for_timeout(2000)
+
+            if el is None:
+                print(f"couldn't find {step['name']} after retries, stopping")
+                break
+
+            if action == "click":
+                click(page, el["index"])
+            else:  # type
+                page.locator(f'[data-ai-index="{el["index"]}"]').focus()
+                page.keyboard.type(step["value"])
+                if step["enter"]:
+                    page.wait_for_timeout(1000)
+                    page.keyboard.press("Enter")
+
+        elif action == "fill":
+            fill_by_name(page, step["name"], step["value"])
+
+        elif action == "press":
+            page.keyboard.press(step["value"])
+
         page.wait_for_timeout(3000)
