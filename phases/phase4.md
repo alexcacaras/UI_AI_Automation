@@ -32,77 +32,40 @@ by index at act-time. Entry shapes:
 type may not change the id-set even when it worked, so the "didn't error" gate
 over-records. Refine later (e.g. verify typed text actually landed) — only against
 observed failures, not hypotheticals.
-## 4b — Manual recording (overlay-driven, no AI)  IN PROGRESS
+### 4b progress — click-capture WORKING (step 3 done)
+- Step 1 (mode menu): DONE — (a)i / (m)anual / (o)verlay / (p)layback. run_loop takes mode.
+- Step 2 (draw_overlays): DONE — numbered badges, max z-index (2147483647) so they sit
+  above flyout/dialog layers.
+- Step 3 (click-capture): DONE. Pattern (Option 2, sync-Playwright-friendly):
+    * badge click sets window.lastClickedBadge = idx  (pure JS, no expose_function callback)
+    * loop (overlay mode) resets it null, then page.wait_for_function("...!== null", timeout=0)
+      — this BLOCKS but pumps browser events, so the click registers (plain input() froze
+      the single thread and the click never arrived — that was the core bug)
+    * read index, REMOVE all badges, then run as "click N"
+  KEY FIX: badges must be removed BEFORE Playwright executes the click — the badge (max
+  z-index, pointer-events:auto so it can catch your click) otherwise INTERCEPTS Playwright's
+  click on the real element ("<div ai-overlay-badge> intercepts pointer events"). So:
+  draw -> catch click -> remove badges -> execute -> re-perceive -> redraw.
+  Recording is UNCHANGED: badge click just produces the same "click N" string the terminal
+  would; existing dispatch + commit gate record it. Proven: clicked Me/My Team/Navigator
+  badges, all executed and recorded.
 
-GOAL: record by interacting with the page visually instead of reading the terminal
-element-list and typing `click 7`. Removes the mental-mapping tax (cross-referencing
-terminal indices to on-screen elements) and the mistype risk. Essentially a
-domain-specific Playwright codegen, tuned to our Step format + Oracle widgets.
+### 4b remaining (the plan)
+- type/fill in overlay mode — INPUT METHOD STILL TBD. Options:
+    A) badge targets element, value typed in terminal (easy, works now, least seamless)
+    B) type into the real Oracle field, capture keystrokes live (most seamless, hardest;
+       badge click = "target this field", keystrokes until next badge = the value — this
+       declaration sidesteps the click+keystroke event-collapsing problem)
+    C) in-page dropdown/input at the badge (middle; most in-page UI to fight Oracle)
+  Decision deferred. fill may be DROPPED in overlay mode — badge already targets the exact
+  element, so the name-based fill shortcut is redundant; just "enter value into this field".
+- Control panel (nav / wait / done) — these have NO element so no badge; a small external
+  panel (Playwright-codegen-style) or terminal commands. Works across overlay mode.
+- press — live key capture. Wrinkle: only capture SPECIAL keys (Enter/Tab/Escape/arrows/
+  Ctrl-combos) as press steps; plain letters are typing, not press steps.
+- done/name/save + fresh-recording-without-restart.
 
-### Why a different INPUT model, same recorder
-Recording logic (pending_step, commit gate, durable locators) is UNCHANGED. Only the
-SOURCE of the command changes: AI (run_loop) vs human-via-overlay (manual_loop). Both
-feed the same recording.json.
-
-### Interaction model (the target design)
-- Numbered badges drawn on every actionable element (the data-ai-index stamps).
-- Click a badge -> dropdown: click / type / fill.
-  - click: executes, records, auto-re-perceives (badges reset). No manual "continue".
-  - type / fill: prompts for a value -> confirm (checkmark/Enter) -> executes, records,
-    re-perceives.
-- press: captured LIVE via a key-listener (you actually press the key on the page).
-  press has no badge and no event-collapsing problem, so live capture is clean here.
-- done: a control to end + name + SAVE the recording. Browser stays open to start a
-  fresh recording without restarting.
-
-### Key design decision: declare intent, don't infer it
-We capture INTENT (you pick "type", give the value) rather than watching raw DOM events
-(click + keystrokes) and trying to collapse them back into one `type` step. Inferring
-intent from raw events is the hard problem codegen tools fight; declaring it via the
-dropdown sidesteps it. (Exception: press, where one keystroke = one step, so live
-capture is fine.)
-
-### The two load-bearing hard parts (build the spine first)
-1. Browser->Python bridge: badge clicks / dropdown picks / values happen in browser JS;
-   recorder is Python. Playwright `expose_function` is the bridge. This is the spine —
-   everything routes through it.
-2. Re-injection: injected overlays + key-listener + control panel are destroyed on every
-   navigation/re-perceive. Must re-inject EVERY perceive, or they vanish mid-recording.
-
-### Build order (smallest-first; prove the spine before features)
-1. Mode menu: main.py -> (a)i drive / (m)anual record / (p)layback.
-2. overlay.py -> draw_overlays(page): always-on numbered badges at each stamped
-   element's corner, pointer-events:none (so later clicks pass through to the real
-   element). VISUAL ONLY first — still type commands in terminal, but read indices off
-   the page. Tests: do badges land on the right elements? can we inject + re-inject?
-3. Click-capture via expose_function (badge click -> index to Python).
-4. Dropdown for action + value input.
-5. press via live key-listener; done/name/save panel; fresh-recording-without-restart.
-
-### Parked (later)
-- Variables / carry-forward (capture an invoice number, reuse downstream) = Phase 8c.
-- Hover-to-reveal badges (start always-on; add hover only if clutter is a problem).
-- In-page panel vs second tab for controls — settle when we reach step 4.
-- Testmodus Selenium recordings -> map to our Step format = Phase 11 (separate front-end,
-  same recording.json target).
-
-### Badge visibility FIXED — it was z-index, not timing
-Diagnosed via DevTools (not assumed): badges WERE drawing (logged 63 stamped) but
-rendered UNDER Oracle's Navigator flyout. zIndex 999999 lost to the flyout's own
-stacking layer. Fix: zIndex = 2147483647 (max 32-bit int) — badges now render above
-flyout, dialogs, calendar picker, everything. Confirmed on home, flyout, full wizard.
-The earlier "settle-gate" theory was WRONG for this bug (page was settling fine; badges
-were just hidden). Settle-gate stays parked — not needed for overlay visibility.
-KNOWN (cosmetic, not fixing now): old badges linger ~1s after an action before the loop
-re-perceives and redraws. Harmless (you read badges after settle). The eventual
-settle-gate would smooth this; not worth blind waits (they make lingering worse).
-
-### NEXT SESSION — top priority: the settle-gate (finally)
-This is now blocking THREE things: clean perceive, replay timing, accurate overlays.
-Build the real settle gate from the Phase 1 spec: wait until
-  - networkidle, AND
-  - no VISIBLE progress dialog (oj-sp-message-progress-dialog / oj-c-dialog progress)
-  - no VISIBLE element with aria-busy="true"
-  - main components carry oj-complete
-...before perceive returns (and before draw_overlays). Replaces all the blind
-wait_for_timeout crutches. Then resume 4b step 3 (click-capture via expose_function).
+### Action-to-method model (decided)
+click = badge (no value). type = badge targets + value (method TBD). fill = likely dropped.
+press = live special-key capture. nav/wait/done = control panel (no badge). Each action uses
+the method that fits it — not one mechanism for all.
