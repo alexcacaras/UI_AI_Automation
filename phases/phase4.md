@@ -32,13 +32,56 @@ by index at act-time. Entry shapes:
 type may not change the id-set even when it worked, so the "didn't error" gate
 over-records. Refine later (e.g. verify typed text actually landed) — only against
 observed failures, not hypotheticals.
+## 4b — Manual recording (overlay-driven, no AI)  IN PROGRESS
 
-## Parked
-- 4b: manual recording via clickable numbered overlays (different front-end, same
-  step format — a human click is intentional by definition, so it sidesteps the
-  commit-gate problem entirely). Build after 4a proves the format.
-- Filename: recording.json overwrites each run (fine for testing). Real use keys
-  the filename to the test name when InstructionSets exist (Phase 0 / 9).
-- Refactor: command-dispatch elifs -> per-action functions (maybe per-action files
-  click/type/press/fill). Housekeeping at next checkpoint, not mid-feature.
-- Phase 11: import Testmodus Selenium recordings -> map into this Step format.
+GOAL: record by interacting with the page visually instead of reading the terminal
+element-list and typing `click 7`. Removes the mental-mapping tax (cross-referencing
+terminal indices to on-screen elements) and the mistype risk. Essentially a
+domain-specific Playwright codegen, tuned to our Step format + Oracle widgets.
+
+### Why a different INPUT model, same recorder
+Recording logic (pending_step, commit gate, durable locators) is UNCHANGED. Only the
+SOURCE of the command changes: AI (run_loop) vs human-via-overlay (manual_loop). Both
+feed the same recording.json.
+
+### Interaction model (the target design)
+- Numbered badges drawn on every actionable element (the data-ai-index stamps).
+- Click a badge -> dropdown: click / type / fill.
+  - click: executes, records, auto-re-perceives (badges reset). No manual "continue".
+  - type / fill: prompts for a value -> confirm (checkmark/Enter) -> executes, records,
+    re-perceives.
+- press: captured LIVE via a key-listener (you actually press the key on the page).
+  press has no badge and no event-collapsing problem, so live capture is clean here.
+- done: a control to end + name + SAVE the recording. Browser stays open to start a
+  fresh recording without restarting.
+
+### Key design decision: declare intent, don't infer it
+We capture INTENT (you pick "type", give the value) rather than watching raw DOM events
+(click + keystrokes) and trying to collapse them back into one `type` step. Inferring
+intent from raw events is the hard problem codegen tools fight; declaring it via the
+dropdown sidesteps it. (Exception: press, where one keystroke = one step, so live
+capture is fine.)
+
+### The two load-bearing hard parts (build the spine first)
+1. Browser->Python bridge: badge clicks / dropdown picks / values happen in browser JS;
+   recorder is Python. Playwright `expose_function` is the bridge. This is the spine —
+   everything routes through it.
+2. Re-injection: injected overlays + key-listener + control panel are destroyed on every
+   navigation/re-perceive. Must re-inject EVERY perceive, or they vanish mid-recording.
+
+### Build order (smallest-first; prove the spine before features)
+1. Mode menu: main.py -> (a)i drive / (m)anual record / (p)layback.
+2. overlay.py -> draw_overlays(page): always-on numbered badges at each stamped
+   element's corner, pointer-events:none (so later clicks pass through to the real
+   element). VISUAL ONLY first — still type commands in terminal, but read indices off
+   the page. Tests: do badges land on the right elements? can we inject + re-inject?
+3. Click-capture via expose_function (badge click -> index to Python).
+4. Dropdown for action + value input.
+5. press via live key-listener; done/name/save panel; fresh-recording-without-restart.
+
+### Parked (later)
+- Variables / carry-forward (capture an invoice number, reuse downstream) = Phase 8c.
+- Hover-to-reveal badges (start always-on; add hover only if clutter is a problem).
+- In-page panel vs second tab for controls — settle when we reach step 4.
+- Testmodus Selenium recordings -> map to our Step format = Phase 11 (separate front-end,
+  same recording.json target).

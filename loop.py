@@ -3,11 +3,12 @@ from actions import click, fill_by_name, did_change
 from llm import ask_llm
 from actions import search_element
 import json
+from overlay import draw_overlays
 
 #loop file
 
 
-def run_loop(page):
+def run_loop(page, mode):
      done = False
      history = []
      previous_elements = None
@@ -53,13 +54,18 @@ def run_loop(page):
         previous_elements = elements
         #cmd = input("\naction? (click N / type N text / nav URL / press N / wait / fill / done):").strip()
         goal = "Open the Navigator and go to My Client Groups and then go to Workforce Structures. You are done when the page shows Workforce Structures items like 'Positions', 'Jobs', and 'Request a New Position' — when you see those, respond with: done"
-        ai_cmd = ask_llm(elements, goal, history[-5:]).strip()
-        if ai_cmd.startswith("nav"):
-            ai_cmd = "nav https://fa-euum-test-saasfaprod1.fa.ocs.oraclecloud.com"
-        print(f"\n AI wants to:{ai_cmd}")
-        cmd = input("Press Enter to run it, or type your own command to override: ").strip()
-        if cmd == "":
-            cmd = ai_cmd
+        if mode == "manual":
+            page.wait_for_timeout(500)
+            draw_overlays(page)
+            cmd = input("\naction? (click N / type N text / nav URL / press N / wait / fill / done):").strip()
+        else:
+            ai_cmd = ask_llm(elements, goal, history[-5:]).strip()
+            if ai_cmd.startswith("nav"):
+                ai_cmd = "nav https://fa-euum-test-saasfaprod1.fa.ocs.oraclecloud.com"
+            print(f"\n AI wants to:{ai_cmd}")
+            cmd = input("Press Enter to run it, or type your own command to override: ").strip()
+            if cmd == "":
+                cmd = ai_cmd
         try:
             if cmd == "done":
                 done = True
