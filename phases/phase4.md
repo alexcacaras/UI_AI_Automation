@@ -85,3 +85,24 @@ capture is fine.)
 - In-page panel vs second tab for controls — settle when we reach step 4.
 - Testmodus Selenium recordings -> map to our Step format = Phase 11 (separate front-end,
   same recording.json target).
+
+### Badge visibility FIXED — it was z-index, not timing
+Diagnosed via DevTools (not assumed): badges WERE drawing (logged 63 stamped) but
+rendered UNDER Oracle's Navigator flyout. zIndex 999999 lost to the flyout's own
+stacking layer. Fix: zIndex = 2147483647 (max 32-bit int) — badges now render above
+flyout, dialogs, calendar picker, everything. Confirmed on home, flyout, full wizard.
+The earlier "settle-gate" theory was WRONG for this bug (page was settling fine; badges
+were just hidden). Settle-gate stays parked — not needed for overlay visibility.
+KNOWN (cosmetic, not fixing now): old badges linger ~1s after an action before the loop
+re-perceives and redraws. Harmless (you read badges after settle). The eventual
+settle-gate would smooth this; not worth blind waits (they make lingering worse).
+
+### NEXT SESSION — top priority: the settle-gate (finally)
+This is now blocking THREE things: clean perceive, replay timing, accurate overlays.
+Build the real settle gate from the Phase 1 spec: wait until
+  - networkidle, AND
+  - no VISIBLE progress dialog (oj-sp-message-progress-dialog / oj-c-dialog progress)
+  - no VISIBLE element with aria-busy="true"
+  - main components carry oj-complete
+...before perceive returns (and before draw_overlays). Replaces all the blind
+wait_for_timeout crutches. Then resume 4b step 3 (click-capture via expose_function).

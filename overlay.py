@@ -24,7 +24,7 @@ def draw_overlays(page):
             badge.style.fontSize = '11px';
             badge.style.fontWeight = 'bold';
             badge.style.padding = '1px 4px';
-            badge.style.zIndex = '999999';
+            badge.style.zIndex = '2147483647';
             badge.style.pointerEvents = 'none';
             document.body.appendChild(badge);
         });
