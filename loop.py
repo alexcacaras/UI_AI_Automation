@@ -58,6 +58,13 @@ def run_loop(page, mode):
             #page.wait_for_timeout(500)
             draw_overlays(page)
             cmd = input("\naction? (click N / type N text / nav URL / press N / wait / fill / done):").strip()
+        elif mode == "overlay":
+            draw_overlays(page)
+            page.evaluate("window.lastClickedBadge = null")
+            page.wait_for_function("window.lastClickedBadge !== null", timeout=0)
+            index = page.evaluate("window.lastClickedBadge")
+            page.evaluate("document.querySelectorAll('.ai-overlay-badge').forEach(b => b.remove())")
+            cmd = f"click {index}"
         else:
             ai_cmd = ask_llm(elements, goal, history[-5:]).strip()
             if ai_cmd.startswith("nav"):
