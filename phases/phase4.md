@@ -50,23 +50,27 @@ observed failures, not hypotheticals.
   would; existing dispatch + commit gate record it. Proven: clicked Me/My Team/Navigator
   badges, all executed and recorded.
 
-### Option 2 (live keystroke capture) — FOUNDATION PROVEN
-Live capture works: keydown listener accumulates window.capturedText, Python reads it back.
-Tested on the search field (a swapping searchselect-type input) — captured 'hello' correctly.
-KEY: this captures the user's KEYSTROKES, not Oracle's DOM value — so it beats read-back,
-which returned empty because Oracle swaps the input on focus. Capture is DOM-swap-proof.
-Seal for the real build = CAPSLOCK (inert: no char, no submit, no close). Test used
-terminal-Enter to isolate capture from seal-key wiring.
+### Option 2 live-type — WORKING (overlay click + type both work)
+- Actions extracted to functions in actions.py: do_click, do_type_python (manual/AI
+  Python-types), do_type_live (overlay captures keystrokes). All return the same
+  pending_step shape -> recording/replay unchanged, don't care which authored it.
+- Overlay branch routes by tag: input/textarea -> do_type_live; else -> click.
+  do_type_live does its action inline (capture), sets cmd="overlay_done", dispatch
+  skips it with `elif cmd == "overlay_done": pass`. (Overlay-type IS the action, like a
+  click — Python records, doesn't re-type.)
+- do_type_live: keydown listener accumulates window.capturedText (handles Backspace),
+  CapsLock sets window._sealed, wait_for_function blocks on seal, read text, record as
+  {action:type, value:<captured>, enter:False}. Landing (Enter/ArrowDown) is separate.
+- GOTCHA fixed: badge index comes back as a STRING from page.evaluate; must int() it
+  before search_element (which matches int index) or el is None.
+- Proven: clicked Search badge (opens box), clicked input badge -> typed live ->
+  CapsLock sealed -> recorded as type step; clicks before/after also recorded.
 
-### Next session — build Option 2 properly (the plan)
-1. Refactor: extract loop actions into functions in actions.py (do_click, do_type_python,
-   do_type_live, do_press, ...). Each returns the same pending_step shape. Loop picks the
-   variant by mode (overlay -> do_type_live; manual/ai -> do_type_python). typeo is an
-   AUTHORING action only — it records as a normal `type` step (replay never sees typeo).
-2. Real overlay-type: badge-click targets field -> capture keystrokes -> CAPSLOCK seals ->
-   record as type N <captured>. The landing (Enter submit, or searchselect pick) is a
-   SEPARATE recorded step.
-3. Searchselect: type (captured) + press ArrowDown + press Enter (keyboard-pick the top
-   match) — avoids the fragile dynamic-option click on replay.
-4. Live press capture (the seal mechanic generalizes — capture special keys as press steps).
-5. nav/wait/done via terminal (hybrid) or later a control panel.
+### Still to do (the control layer — nav/wait/done/press)
+- DONE in overlay: no path yet (loop waits for badge click). Next: make the overlay
+  wait watch for EITHER a badge click OR a key (Escape=done), via
+  "window.lastClickedBadge !== null || window.overlayDone === true". This "wait for
+  badge OR key" pattern is the foundation for nav/wait/done/press too.
+- press live-capture, nav, wait: same control-layer pattern.
+- Searchselect: type (live) + ArrowDown + Enter to pick top match (test on replay).
+- Then: full overlay record -> save -> replay cycle test.

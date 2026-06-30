@@ -1,6 +1,8 @@
 
 #The actions file helper functions
-
+#=============================================
+#---------------helper actions---------------
+#=============================================
 def click(page, index):
     locator = page.locator(f'[data-ai-index="{index}"]')
     tag = locator.evaluate("el => el.tagName.toLowerCase()")
@@ -28,6 +30,10 @@ def fill_by_name(page, name, value):
     except Exception as e:
         print(f"fill failed: {e}")
 
+#=============================================
+#------------------helpers--------------------
+#=============================================
+
 def did_change(before, after):
     before_sig = {(el["id"], el["name"]) for el in before}
     after_sig  = {(el["id"], el["name"]) for el in after}
@@ -53,3 +59,42 @@ def find_by_name(elements, target_name, target_tag):
         if el["name"] == target_name and el["tag"] == target_tag:
             return el
     return None
+
+#=============================================
+#---------------do helper actions-------------
+#=============================================
+
+def do_click(page, index, elements):
+    click(page, index)
+    el = search_element(elements, index)
+    pending_step = {"action": "click", "id": el["id"], "name": el["name"], "role": el["role"], "tag": el["tag"]}
+    return pending_step
+
+def do_type_python(page, index, text, press_enter, elements):
+    page.locator(f'[data-ai-index="{index}"]').focus()
+    page.keyboard.type(text)
+    if press_enter:
+        page.keyboard.press("Enter")
+    el = search_element(elements, index)
+    pending_step = {"action": "type", "id": el["id"], "name": el["name"], "role": el["role"], "tag": el["tag"], "value": text, "enter": press_enter}
+    return pending_step
+
+def do_type_live(page, index, elements):
+    # capture keystrokes the user types into the focused field
+    page.evaluate("""
+        window.capturedText = '';
+        window._captureHandler = (e) => {
+            if (e.key === 'Backspace') { window.capturedText = window.capturedText.slice(0,-1); }
+            else if (e.key === 'CapsLock') { window._sealed = true; }
+            else if (e.key.length === 1) { window.capturedText += e.key; }
+        };
+        window._sealed = false;
+        document.addEventListener('keydown', window._captureHandler);
+    """)
+    page.locator(f'[data-ai-index="{index}"]').click()   # open/focus the field
+    page.wait_for_function("window._sealed === true", timeout=0)   # wait for CapsLock seal
+    text = page.evaluate("window.capturedText")
+    page.evaluate("document.removeEventListener('keydown', window._captureHandler)")
+    el = search_element(elements, index)
+    pending_step = {"action": "type", "id": el["id"], "name": el["name"], "role": el["role"], "tag": el["tag"], "value": text, "enter": False}
+    return pending_step

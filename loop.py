@@ -1,5 +1,5 @@
 from perceive import perceive
-from actions import click, fill_by_name, did_change
+from actions import click, fill_by_name, did_change, do_click, do_type_python, do_type_live
 from llm import ask_llm
 from actions import search_element
 import json
@@ -63,25 +63,14 @@ def run_loop(page, mode):
             page.evaluate("window.lastClickedBadge = null")
             page.wait_for_function("window.lastClickedBadge !== null", timeout=0)
             index = page.evaluate("window.lastClickedBadge")
+            index = int(index)
             page.evaluate("document.querySelectorAll('.ai-overlay-badge').forEach(b => b.remove())")
-            # set up live capture
-            page.evaluate("""
-                window.capturedText = '';
-                window._captureHandler = (e) => {
-                    if (e.key === 'Backspace') {
-                        window.capturedText = window.capturedText.slice(0, -1);
-                    } else if (e.key.length === 1) {
-                        window.capturedText += e.key;
-                    }
-                };
-                document.addEventListener('keydown', window._captureHandler);
-            """)
-            page.locator(f'[data-ai-index="{index}"]').focus()
-            input("type into the field in the browser, then press Enter HERE to seal...")
-            captured = page.evaluate("window.capturedText")
-            page.evaluate("document.removeEventListener('keydown', window._captureHandler)")
-            print(f"CAPTURED: '{captured}'")
-            cmd = f"click {index}"
+            el = search_element(elements, index)
+            if el["tag"] in ("input", "textarea"):
+                pending_step = do_type_live(page, int(index), elements)
+                cmd = "overlay_done"
+            else:
+                cmd = f"click {index}"
         else:
             ai_cmd = ask_llm(elements, goal, history[-5:]).strip()
             if ai_cmd.startswith("nav"):
@@ -93,11 +82,11 @@ def run_loop(page, mode):
         try:
             if cmd == "done":
                 done = True
+            elif cmd == "overlay_done":
+                pass
             elif cmd.startswith("click "):
                 index = int(cmd.split()[1])
-                click(page, index)
-                el = search_element(elements, index)
-                pending_step = {"action": "click", "id": el["id"], "name": el["name"], "role": el["role"], "tag": el["tag"]}
+                pending_step = do_click(page, index, elements)
 
             elif cmd.startswith("type "):
                 parts = cmd.split(maxsplit=2)
@@ -106,12 +95,7 @@ def run_loop(page, mode):
                 press_enter = text.endswith(" Enter")
                 if press_enter:
                     text = text[:-6]
-                page.locator(f'[data-ai-index="{index}"]').focus()
-                page.keyboard.type(text)
-                if press_enter:
-                    page.keyboard.press("Enter")
-                el = search_element(elements, index)
-                pending_step = {"action": "type", "id": el["id"], "name": el["name"], "role": el["role"], "tag": el["tag"], "value": text, "enter": press_enter}
+                pending_step = do_type_python(page, index, text, press_enter, elements)
 
             elif cmd.startswith("fill "):
                 rest = cmd.split(maxsplit=1)[1]                       
