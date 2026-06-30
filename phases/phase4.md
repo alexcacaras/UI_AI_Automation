@@ -50,22 +50,23 @@ observed failures, not hypotheticals.
   would; existing dispatch + commit gate record it. Proven: clicked Me/My Team/Navigator
   badges, all executed and recorded.
 
-### 4b remaining (the plan)
-- type/fill in overlay mode — INPUT METHOD STILL TBD. Options:
-    A) badge targets element, value typed in terminal (easy, works now, least seamless)
-    B) type into the real Oracle field, capture keystrokes live (most seamless, hardest;
-       badge click = "target this field", keystrokes until next badge = the value — this
-       declaration sidesteps the click+keystroke event-collapsing problem)
-    C) in-page dropdown/input at the badge (middle; most in-page UI to fight Oracle)
-  Decision deferred. fill may be DROPPED in overlay mode — badge already targets the exact
-  element, so the name-based fill shortcut is redundant; just "enter value into this field".
-- Control panel (nav / wait / done) — these have NO element so no badge; a small external
-  panel (Playwright-codegen-style) or terminal commands. Works across overlay mode.
-- press — live key capture. Wrinkle: only capture SPECIAL keys (Enter/Tab/Escape/arrows/
-  Ctrl-combos) as press steps; plain letters are typing, not press steps.
-- done/name/save + fresh-recording-without-restart.
+### Option 2 (live keystroke capture) — FOUNDATION PROVEN
+Live capture works: keydown listener accumulates window.capturedText, Python reads it back.
+Tested on the search field (a swapping searchselect-type input) — captured 'hello' correctly.
+KEY: this captures the user's KEYSTROKES, not Oracle's DOM value — so it beats read-back,
+which returned empty because Oracle swaps the input on focus. Capture is DOM-swap-proof.
+Seal for the real build = CAPSLOCK (inert: no char, no submit, no close). Test used
+terminal-Enter to isolate capture from seal-key wiring.
 
-### Action-to-method model (decided)
-click = badge (no value). type = badge targets + value (method TBD). fill = likely dropped.
-press = live special-key capture. nav/wait/done = control panel (no badge). Each action uses
-the method that fits it — not one mechanism for all.
+### Next session — build Option 2 properly (the plan)
+1. Refactor: extract loop actions into functions in actions.py (do_click, do_type_python,
+   do_type_live, do_press, ...). Each returns the same pending_step shape. Loop picks the
+   variant by mode (overlay -> do_type_live; manual/ai -> do_type_python). typeo is an
+   AUTHORING action only — it records as a normal `type` step (replay never sees typeo).
+2. Real overlay-type: badge-click targets field -> capture keystrokes -> CAPSLOCK seals ->
+   record as type N <captured>. The landing (Enter submit, or searchselect pick) is a
+   SEPARATE recorded step.
+3. Searchselect: type (captured) + press ArrowDown + press Enter (keyboard-pick the top
+   match) — avoids the fragile dynamic-option click on replay.
+4. Live press capture (the seal mechanic generalizes — capture special keys as press steps).
+5. nav/wait/done via terminal (hybrid) or later a control panel.

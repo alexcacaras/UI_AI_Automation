@@ -64,6 +64,23 @@ def run_loop(page, mode):
             page.wait_for_function("window.lastClickedBadge !== null", timeout=0)
             index = page.evaluate("window.lastClickedBadge")
             page.evaluate("document.querySelectorAll('.ai-overlay-badge').forEach(b => b.remove())")
+            # set up live capture
+            page.evaluate("""
+                window.capturedText = '';
+                window._captureHandler = (e) => {
+                    if (e.key === 'Backspace') {
+                        window.capturedText = window.capturedText.slice(0, -1);
+                    } else if (e.key.length === 1) {
+                        window.capturedText += e.key;
+                    }
+                };
+                document.addEventListener('keydown', window._captureHandler);
+            """)
+            page.locator(f'[data-ai-index="{index}"]').focus()
+            input("type into the field in the browser, then press Enter HERE to seal...")
+            captured = page.evaluate("window.capturedText")
+            page.evaluate("document.removeEventListener('keydown', window._captureHandler)")
+            print(f"CAPTURED: '{captured}'")
             cmd = f"click {index}"
         else:
             ai_cmd = ask_llm(elements, goal, history[-5:]).strip()
