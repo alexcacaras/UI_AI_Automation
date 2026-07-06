@@ -31,3 +31,54 @@ def draw_overlays(page):
         });
     }
     """)
+
+def install_listener(page):
+    page.evaluate("""
+        if (!window._overlayHandler) {
+            window.capturedText = '';
+            window._lastAction = null;
+            window.lastClickedBadge = null;
+
+            window.elementInfo = function(el) {
+                if (!el) return null;
+                return {
+                    id: el.id || '',
+                    name: el.getAttribute('aria-label') || el.getAttribute('title') ||
+                          el.getAttribute('placeholder') || el.innerText || '',
+                    tag: el.tagName.toLowerCase()
+                };
+            }
+
+            window._overlayHandler = (e) => {
+                const k = e.key;
+                if (k === 'Backspace') {
+                    window.capturedText = window.capturedText.slice(0, -1);
+                }
+                else if (k === 'CapsLock') {
+                    if (window.capturedText !== '') {
+                        window._lastAction = { kind: 'seal', mode: 'replace', value: window.capturedText, target: window.elementInfo(document.activeElement) };
+                        window.capturedText = '';
+                    }
+                }
+                else if (k === 'Insert') {
+                    if (window.capturedText !== '') {
+                        window._lastAction = { kind: 'seal', mode: 'append', value: window.capturedText, target: window.elementInfo(document.activeElement) };
+                        window.capturedText = '';
+                    }
+                }
+                else if (k === 'Shift' || k === 'Control' || k === 'Alt' || k === 'Meta') {
+                    // ignore bare modifier keys
+                }
+                else if (k.length === 1) {
+                    if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+                        window.capturedText += k;
+                    }
+                    // else: Ctrl/Cmd/Alt combo (Ctrl+A, Ctrl+C) — don't capture the letter
+                }
+                else {
+                    window._lastAction = { kind: 'press', value: k };
+                }
+            };
+            document.addEventListener('keydown', window._overlayHandler);
+        }
+    """)

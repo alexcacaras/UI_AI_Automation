@@ -20,6 +20,8 @@ with sync_playwright() as p:
     elif mode == "m":
         run_loop(page, mode="manual")
     elif mode == "o":
+        from command_center import start_command_center
+        start_command_center()
         run_loop(page, mode="overlay")
     else:
         run_loop(page, mode ="ai")

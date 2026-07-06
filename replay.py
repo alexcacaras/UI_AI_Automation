@@ -62,4 +62,10 @@ def replay(page):
         elif action == "press":
             page.keyboard.press(step["value"])
 
+        elif step["action"] == "nav":
+            page.goto(step["value"])
+
+        elif step["action"] == "wait":
+            page.wait_for_timeout(3000)
+
         page.wait_for_timeout(3000)

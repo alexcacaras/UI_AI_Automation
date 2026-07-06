@@ -3,7 +3,9 @@ from actions import click, fill_by_name, did_change, do_click, do_type_python, d
 from llm import ask_llm
 from actions import search_element
 import json
-from overlay import draw_overlays
+from overlay import draw_overlays, install_listener
+from command_center import command_queue
+import queue
 
 #loop file
 
@@ -60,17 +62,49 @@ def run_loop(page, mode):
             cmd = input("\naction? (click N / type N text / nav URL / press N / wait / fill / done):").strip()
         elif mode == "overlay":
             draw_overlays(page)
-            page.evaluate("window.lastClickedBadge = null")
-            page.wait_for_function("window.lastClickedBadge !== null", timeout=0)
-            index = page.evaluate("window.lastClickedBadge")
-            index = int(index)
-            page.evaluate("document.querySelectorAll('.ai-overlay-badge').forEach(b => b.remove())")
-            el = search_element(elements, index)
-            if el["tag"] in ("input", "textarea"):
-                pending_step = do_type_live(page, int(index), elements)
-                cmd = "overlay_done"
+            install_listener(page)
+
+            cc_cmd = None
+            while True:
+                try:
+                    page.wait_for_function(
+                        "window.lastClickedBadge !== null || window._lastAction !== null",
+                        timeout=500
+                    )
+                    break
+                except:
+                    try:
+                        cc_cmd = command_queue.get_nowait()
+                        break
+                    except queue.Empty:
+                        continue
+
+            if cc_cmd is not None:
+                cmd = cc_cmd
             else:
-                cmd = f"click {index}"
+                badge = page.evaluate("window.lastClickedBadge")
+                action = page.evaluate("window._lastAction")
+                page.evaluate("window.lastClickedBadge = null; window._lastAction = null;")
+
+                if badge is not None:
+                    index = int(badge)
+                    page.evaluate("document.querySelectorAll('.ai-overlay-badge').forEach(b => b.remove())")
+                    step = do_click(page, index, elements)
+                    recording.append(step)          # commit immediately — overlay is deliberate
+                    cmd = "overlay_done"
+                elif action is not None and action["kind"] == "seal":
+                    print(f">>> SEAL: value='{action['value']}' target={action['target']}")
+                    if action["value"] != "":
+                        t = action["target"] or {}
+                        step = {"action": "type", "id": t.get("id",""), "name": t.get("name",""),
+                                "role": "", "tag": t.get("tag",""),
+                                "value": action["value"], "mode": action["mode"], "enter": False}
+                        recording.append(step)      # commit immediately
+                    cmd = "overlay_done"
+                elif action is not None and action["kind"] == "press":
+                    step = {"action": "press", "value": action["value"]}
+                    recording.append(step)          # commit immediately
+                    cmd = "overlay_done"
         else:
             ai_cmd = ask_llm(elements, goal, history[-5:]).strip()
             if ai_cmd.startswith("nav"):
@@ -111,7 +145,10 @@ def run_loop(page, mode):
 
             elif cmd.startswith("nav "):
                 url = cmd.split(maxsplit=1)[1]
+                if not url.startswith("http"):
+                    url = "https://" + url
                 page.goto(url)
+                recording.append({"action": "nav", "value": url})
 
             elif cmd.startswith("press "):
                 parts = cmd.split()
@@ -123,6 +160,7 @@ def run_loop(page, mode):
 
             elif cmd == "wait":
                 page.wait_for_timeout(3000)
+                recording.append({"action": "wait"})
             else:
                 print("didnt understand that - try: click 9 / type 9 hello / nav http://... / press Enter / wait / fill / done")
             history.append({"cmd": cmd, "result": "pending"})

@@ -32,45 +32,70 @@ by index at act-time. Entry shapes:
 type may not change the id-set even when it worked, so the "didn't error" gate
 over-records. Refine later (e.g. verify typed text actually landed) — only against
 observed failures, not hypotheticals.
-### 4b progress — click-capture WORKING (step 3 done)
-- Step 1 (mode menu): DONE — (a)i / (m)anual / (o)verlay / (p)layback. run_loop takes mode.
-- Step 2 (draw_overlays): DONE — numbered badges, max z-index (2147483647) so they sit
-  above flyout/dialog layers.
-- Step 3 (click-capture): DONE. Pattern (Option 2, sync-Playwright-friendly):
-    * badge click sets window.lastClickedBadge = idx  (pure JS, no expose_function callback)
-    * loop (overlay mode) resets it null, then page.wait_for_function("...!== null", timeout=0)
-      — this BLOCKS but pumps browser events, so the click registers (plain input() froze
-      the single thread and the click never arrived — that was the core bug)
-    * read index, REMOVE all badges, then run as "click N"
-  KEY FIX: badges must be removed BEFORE Playwright executes the click — the badge (max
-  z-index, pointer-events:auto so it can catch your click) otherwise INTERCEPTS Playwright's
-  click on the real element ("<div ai-overlay-badge> intercepts pointer events"). So:
-  draw -> catch click -> remove badges -> execute -> re-perceive -> redraw.
-  Recording is UNCHANGED: badge click just produces the same "click N" string the terminal
-  would; existing dispatch + commit gate record it. Proven: clicked Me/My Team/Navigator
-  badges, all executed and recorded.
+## 4b — Overlay recorder + live capture + command center  COMPLETE
 
-### Option 2 live-type — WORKING (overlay click + type both work)
-- Actions extracted to functions in actions.py: do_click, do_type_python (manual/AI
-  Python-types), do_type_live (overlay captures keystrokes). All return the same
-  pending_step shape -> recording/replay unchanged, don't care which authored it.
-- Overlay branch routes by tag: input/textarea -> do_type_live; else -> click.
-  do_type_live does its action inline (capture), sets cmd="overlay_done", dispatch
-  skips it with `elif cmd == "overlay_done": pass`. (Overlay-type IS the action, like a
-  click — Python records, doesn't re-type.)
-- do_type_live: keydown listener accumulates window.capturedText (handles Backspace),
-  CapsLock sets window._sealed, wait_for_function blocks on seal, read text, record as
-  {action:type, value:<captured>, enter:False}. Landing (Enter/ArrowDown) is separate.
-- GOTCHA fixed: badge index comes back as a STRING from page.evaluate; must int() it
-  before search_element (which matches int index) or el is None.
-- Proven: clicked Search badge (opens box), clicked input badge -> typed live ->
-  CapsLock sealed -> recorded as type step; clicks before/after also recorded.
+Record by using the page directly: numbered badges on live elements (click to record
+clicks), live keystroke capture (type into real fields, sealed to record), and a
+threaded command center for nav/wait/done. All actions produce the standard identity-
+based step format, so overlay recordings replay via Phase 5 identically to AI/manual.
 
-### Still to do (the control layer — nav/wait/done/press)
-- DONE in overlay: no path yet (loop waits for badge click). Next: make the overlay
-  wait watch for EITHER a badge click OR a key (Escape=done), via
-  "window.lastClickedBadge !== null || window.overlayDone === true". This "wait for
-  badge OR key" pattern is the foundation for nav/wait/done/press too.
-- press live-capture, nav, wait: same control-layer pattern.
-- Searchselect: type (live) + ArrowDown + Enter to pick top match (test on replay).
-- Then: full overlay record -> save -> replay cycle test.
+### Modes
+main.py: (a)i / (m)anual / (o)verlay / (p)layback. run_loop takes a `mode` param.
+All modes share one perceive + dispatch + recording core; only the command SOURCE differs.
+
+### Overlay input model (the design that works)
+One always-on JS keydown listener (install_listener), installed ONCE per page
+(guarded by `if (!window._overlayHandler)` so re-perceives don't wipe capturedText or
+stack duplicate listeners — this guard was the fix for types not recording):
+- character keys -> accumulate window.capturedText  (live capture, DOM-swap-proof)
+- Backspace -> trims capturedText (edits, never recorded)
+- CapsLock -> seal as type mode=replace ; Insert -> seal mode=append
+    (only fires if capturedText != '' — empty-seal guard, avoids clobbering _lastAction)
+- character while Ctrl/Cmd/Alt held -> IGNORED (Ctrl+A/Ctrl+C were leaking letters like
+    "ca" into values — guarded by checking !e.ctrlKey etc.)
+- bare Shift/Control/Alt/Meta -> ignored
+- everything else (Enter/Tab/arrows/PageDown/F-keys...) -> press step
+Seal captures document.activeElement as the type target + value + mode.
+
+### Browser->Python channels
+- badges set window.lastClickedBadge (sticky-note); listener sets window._lastAction.
+- Loop polls: wait_for_function(badge OR _lastAction, timeout=500); on timeout, check
+  the command-center queue (get_nowait). So it waits for badge-click OR keyboard OR
+  command-center button, all at once. (Solves: input()/blocking wait can't also hear
+  other sources.)
+
+### Command center (threaded)
+command_center.py: tkinter window (dark themed, always-on-top) in a daemon thread,
+started once for overlay mode. Buttons put commands in a queue: Done / Wait / Nav(+url).
+The loop reads the queue in its poll. Threading + queue.Queue is the safe cross-thread
+mailbox; the GUI thread and the Playwright loop run independently.
+
+### Recording: immediate-commit for overlay
+Overlay actions are DELIBERATE (human clicked/typed on purpose), so they commit
+immediately (recording.append right when done) — NOT through the did_change gate.
+The gate's "only record clicks if changed" was DROPPING deliberate overlay clicks
+(4-of-5 lost); immediate-commit fixed it. (AI/manual still use the deferred gate.)
+
+### nav / wait now recorded (all modes)
+nav dispatch: records {action:nav, value:url} + auto-prepends https:// if missing.
+wait dispatch: records {action:wait}. done is NOT recorded (it just ends the run).
+replay.py handles nav (page.goto) and wait (wait_for_timeout).
+
+### Proven
+Full action set records AND replays: click, type (live+seal, replace/append), press,
+nav, wait. Overlay-authored recording replays deterministically via Phase 5.
+
+## 4b — Parked / known limits (next work)
+- SEARCHSELECT TIMING: type->Enter races Oracle's dropdown filter (Enter fires before
+  the filtered option appears). A manual pause helps but is fragile. Real fix: for
+  combobox fields (role=combobox), replay should type full value -> wait ~800ms ->
+  Enter (reuse fill_by_name's proven pattern). Also: searchselect swaps to an ephemeral
+  `oj-searchselect-filter-...` input on focus, so the seal's activeElement grabs that
+  transient id — should attribute the type to the last-CLICKED stable field id instead.
+- DATE PICKER: clicking calendar days crashes; workaround = type the date as text.
+- SCROLLING / below-the-fold: perceive only sees the viewport; PageDown records but
+  doesn't reliably scroll Oracle. Need scroll-and-re-perceive (mouse.wheel or container
+  scroll) to reach/record lower elements. Likely the highest-value next fix for long forms.
+- Single-slot _lastAction can drop an action if two happen within the 500ms poll (rare).
+- Multiple recordings: still one recording.json scratch file; key by test name later.
+- Remove the >>> SEAL debug print for a clean version.
