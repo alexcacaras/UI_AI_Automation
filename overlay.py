@@ -1,3 +1,7 @@
+import queue
+click_queue = queue.Queue()
+
+
 def draw_overlays(page):
     page.evaluate("""
     () => {
@@ -25,8 +29,8 @@ def draw_overlays(page):
             badge.style.fontWeight = 'bold';
             badge.style.padding = '1px 4px';
             badge.style.zIndex = '2147483647';
-            badge.style.pointerEvents = 'auto';
-            badge.addEventListener('click', () => { window.lastClickedBadge = idx; });
+            badge.style.pointerEvents = 'none';
+            
             document.body.appendChild(badge);
         });
     }
@@ -37,17 +41,31 @@ def install_listener(page):
         if (!window._overlayHandler) {
             window.capturedText = '';
             window._lastAction = null;
-            window.lastClickedBadge = null;
+            window._lastClickedElement = null;
 
             window.elementInfo = function(el) {
                 if (!el) return null;
+                let id = el.id || '';
+                const P = 'oj-searchselect-filter-';
+                if (id.startsWith(P)) { id = id.slice(P.length); }
                 return {
-                    id: el.id || '',
+                    id: id,
                     name: el.getAttribute('aria-label') || el.getAttribute('title') ||
-                          el.getAttribute('placeholder') || el.innerText || '',
-                    tag: el.tagName.toLowerCase()
+                        el.getAttribute('placeholder') || el.innerText || '',
+                    tag: el.tagName.toLowerCase(),
+                    role: el.getAttribute('role') || ''
                 };
             }
+
+            window._overlayClickHandler = (e) => {
+                const el = e.target.closest('[data-ai-index]');
+                if (el) {
+                    const info = window.elementInfo(el);
+                    window._lastClickedElement = info;
+                    window.badgeClicked(info);
+                }
+            };
+            document.addEventListener('click', window._overlayClickHandler, true);
 
             window._overlayHandler = (e) => {
                 const k = e.key;
@@ -73,7 +91,6 @@ def install_listener(page):
                     if (!e.ctrlKey && !e.metaKey && !e.altKey) {
                         window.capturedText += k;
                     }
-                    // else: Ctrl/Cmd/Alt combo (Ctrl+A, Ctrl+C) — don't capture the letter
                 }
                 else {
                     window._lastAction = { kind: 'press', value: k };

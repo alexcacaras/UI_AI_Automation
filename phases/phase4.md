@@ -32,12 +32,13 @@ by index at act-time. Entry shapes:
 type may not change the id-set even when it worked, so the "didn't error" gate
 over-records. Refine later (e.g. verify typed text actually landed) — only against
 observed failures, not hypotheticals.
+
 ## 4b — Overlay recorder + live capture + command center  COMPLETE
 
-Record by using the page directly: numbered badges on live elements (click to record
-clicks), live keystroke capture (type into real fields, sealed to record), and a
-threaded command center for nav/wait/done. All actions produce the standard identity-
-based step format, so overlay recordings replay via Phase 5 identically to AI/manual.
+Record by using the page directly: numbered badges on live elements, live keystroke
+capture (type into real fields, sealed to record), and a threaded command center for
+nav/wait/done/scroll. All actions produce the standard identity-based step format, so
+overlay recordings replay via Phase 5 identically to AI/manual.
 
 ### Modes
 main.py: (a)i / (m)anual / (o)verlay / (p)layback. run_loop takes a `mode` param.
@@ -55,20 +56,27 @@ stack duplicate listeners — this guard was the fix for types not recording):
     "ca" into values — guarded by checking !e.ctrlKey etc.)
 - bare Shift/Control/Alt/Meta -> ignored
 - everything else (Enter/Tab/arrows/PageDown/F-keys...) -> press step
-Seal captures document.activeElement as the type target + value + mode.
+Seal captures document.activeElement as the type target + value + mode. The target
+passes through elementInfo(), which STRIPS the `oj-searchselect-filter-` prefix off
+the id (see 4d).
 
-### Browser->Python channels
-- badges set window.lastClickedBadge (sticky-note); listener sets window._lastAction.
-- Loop polls: wait_for_function(badge OR _lastAction, timeout=500); on timeout, check
-  the command-center queue (get_nowait). So it waits for badge-click OR keyboard OR
-  command-center button, all at once. (Solves: input()/blocking wait can't also hear
-  other sources.)
+### Browser->Python channels (rewritten in 4d)
+- CLICKS: pushed. Badges are pointerEvents:none LABELS; a capture-phase click listener
+  on document reads e.target.closest('[data-ai-index]') and calls
+  window.badgeClicked(elementInfo(el)) — a page.expose_function bound in main.py that
+  drops the identity straight into a Python queue.Queue (overlay.click_queue).
+- KEYS: still polled. install_listener sets window._lastAction; the loop reads it via
+  wait_for_function(timeout=300).
+- COMMAND CENTER: Python queue (command_queue).
+- Loop poll order: click_queue (nowait) -> command_queue (nowait) -> _lastAction
+  (blocking 300ms, which is what makes the loop breathe rather than spin).
 
 ### Command center (threaded)
 command_center.py: tkinter window (dark themed, always-on-top) in a daemon thread,
-started once for overlay mode. Buttons put commands in a queue: Done / Wait / Nav(+url).
-The loop reads the queue in its poll. Threading + queue.Queue is the safe cross-thread
-mailbox; the GUI thread and the Playwright loop run independently.
+started once for overlay mode. Buttons put commands in a queue: Done / Wait / Nav(+url)
+/ Scroll page / Scroll table. The loop reads the queue in its poll. Threading +
+queue.Queue is the safe cross-thread mailbox; the GUI thread and the Playwright loop
+run independently.
 
 ### Recording: immediate-commit for overlay
 Overlay actions are DELIBERATE (human clicked/typed on purpose), so they commit
@@ -83,7 +91,7 @@ replay.py handles nav (page.goto) and wait (wait_for_timeout).
 
 ### Proven
 Full action set records AND replays: click, type (live+seal, replace/append), press,
-nav, wait. Overlay-authored recording replays deterministically via Phase 5.
+nav, wait, scroll. Overlay-authored recording replays deterministically via Phase 5.
 
 ## 4c — Scroll (page + table)  DONE
 
@@ -133,14 +141,63 @@ wrong one. First suspect if a future grid scrolls the wrong region.
 PARKED (recording noise): scroll records pixel amounts verbatim, so authoring fumbles
 (1800, then 600, 600, 600) replay faithfully. Works, but noisy — same "recording
 cleanliness" item already parked in phase5.md.
-## 4b — Parked / known limits (next work)
-- SEARCHSELECT TIMING: type->Enter races Oracle's dropdown filter (Enter fires before
-  the filtered option appears). A manual pause helps but is fragile. Real fix: for
-  combobox fields (role=combobox), replay should type full value -> wait ~800ms ->
-  Enter (reuse fill_by_name's proven pattern). Also: searchselect swaps to an ephemeral
-  `oj-searchselect-filter-...` input on focus, so the seal's activeElement grabs that
-  transient id — should attribute the type to the last-CLICKED stable field id instead.
-- DATE PICKER: clicking calendar days crashes; workaround = type the date as text.
-- Single-slot _lastAction can drop an action if two happen within the 500ms poll (rare).
+
+## 4d — Overlay click channel rebuilt: identity at click-time  DONE
+
+Three bugs, one root cause: overlay INTERCEPTED clicks and resolved them LATER by index.
+
+### DATE PICKER — solved (was: "clicking calendar days crashes")
+Not a calendar bug. Badges had pointerEvents:auto and their own click listener, so the
+badge ate the click. Oracle saw a click OUTSIDE the popup -> closed the calendar ->
+Python then ran do_click() on a now-hidden element -> 30s Playwright timeout
+("element is not visible"). Manual/AI never hit it because they don't draw clickable
+badges.
+FIX: badges become pointerEvents:none labels. A capture-phase document click listener
+observes the REAL click. The human's click both DOES the thing and gets recorded.
+Overlay must therefore NOT re-click: do_click was firing a SECOND click on a closed
+calendar. Overlay's badge branch now records only.
+
+### NAVIGATION CLICKS — solved (regression introduced by the above, then closed)
+Once the human's click acts immediately, the page can navigate BEFORE Python reads the
+sticky note. wait_for_function returns a JSHandle — a pointer into the page's JS heap —
+and navigation destroys that heap: "Execution context was destroyed". Every navigating
+click was silently DROPPED. Polling cannot fix a read-after-the-fact.
+FIX: page.expose_function("badgeClicked", ...). The browser PUSHES the identity into
+Python at click-time, before navigation begins. Nothing to read later, nothing to lose.
+
+### SEARCHSELECT id — solved
+Oracle swaps in an ephemeral `oj-searchselect-filter-<stableId>|input` on focus. The
+seal's activeElement grabbed it; that id doesn't exist on replay -> find_by_id fails.
+FAILED FIX (recorded so it isn't retried): attribute the type to _lastClickedElement
+(the last stamped element clicked). The swap happens DURING the click, so closest()
+finds nothing and the memory keeps the PREVIOUS element — it recorded a type into
+"Continue". The last-clicked memory fails for exactly the widget it was meant to fix.
+FIX: keep activeElement (it genuinely IS the field being typed into) and normalise the
+id in elementInfo() by stripping the known prefix. Hardcodes an Oracle internal string;
+empirical, and it corrects a right signal rather than replacing it with a guessy one.
+
+### The principle that fell out
+CAPTURE identity, not position. lastClickedBadge used to hold an INDEX that Python
+resolved against a possibly-stale `elements` list (perceive renumbers on every
+re-render). Now the browser captures {id, name, tag, role} at the instant of the click.
+No lookup, nothing to go stale. This is "record identity, never index" applied to the
+CAPTURE path, not just the storage format.
+
+PROVEN: one overlay run recorded navigating clicks, a calendar day ("14"), a
+searchselect (stable id), scroll page + table — and replayed end to end.
+
+PARKED: elementInfo's name chain is weaker than perceive's getName() — no <label for>,
+no |hint, no proximity. So date/reason fields record name:"". Harmless while id is
+present; would bite an id-less element.
+
+## Parked / known limits (next work)
+- SEARCHSELECT TIMING (still open): type->Enter races Oracle's dropdown filter. Real
+  fix: for role=combobox, replay should type full value -> wait ~800ms -> Enter (reuse
+  fill_by_name's proven pattern). Note the recorded type and press-Enter are SEPARATE
+  steps, so replay's `if step["enter"]` 1s settle never fires for overlay recordings.
+- find_by_name(name, tag) is ambiguous for id-less elements (the calendar has several
+  cells named T/S). "14" replayed today, but a recording replayed next month points at
+  a different date. Phase 0's ranked locators are the real answer.
+- Single-slot _lastAction can drop an action if two happen within the 300ms poll (rare).
 - Multiple recordings: still one recording.json scratch file; key by test name later.
 - Remove the >>> SEAL debug print for a clean version.

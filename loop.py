@@ -3,7 +3,7 @@ from actions import click, fill_by_name, did_change, do_click, do_type_python, d
 from llm import ask_llm
 from actions import search_element
 import json
-from overlay import draw_overlays, install_listener
+from overlay import draw_overlays, install_listener, click_queue
 from command_center import command_queue
 import queue
 
@@ -65,46 +65,55 @@ def run_loop(page, mode):
             install_listener(page)
 
             cc_cmd = None
+            click_info = None
+            action = None
             while True:
+                # 1. did a click arrive from the browser? (pushed, not polled)
                 try:
-                    page.wait_for_function(
-                        "window.lastClickedBadge !== null || window._lastAction !== null",
-                        timeout=500
+                    click_info = click_queue.get_nowait()
+                    break
+                except queue.Empty:
+                    pass
+
+                # 2. did a command-center button fire?
+                try:
+                    cc_cmd = command_queue.get_nowait()
+                    break
+                except queue.Empty:
+                    pass
+
+                # 3. did a keystroke seal or a press happen?
+                try:
+                    handle = page.wait_for_function(
+                        "window._lastAction !== null ? window._lastAction : null",
+                        timeout=300
                     )
+                    action = handle.json_value()
+                    page.evaluate("window._lastAction = null;")
                     break
                 except:
-                    try:
-                        cc_cmd = command_queue.get_nowait()
-                        break
-                    except queue.Empty:
-                        continue
+                    continue
 
             if cc_cmd is not None:
                 cmd = cc_cmd
-            else:
-                badge = page.evaluate("window.lastClickedBadge")
-                action = page.evaluate("window._lastAction")
-                page.evaluate("window.lastClickedBadge = null; window._lastAction = null;")
-
-                if badge is not None:
-                    index = int(badge)
-                    page.evaluate("document.querySelectorAll('.ai-overlay-badge').forEach(b => b.remove())")
-                    step = do_click(page, index, elements)
-                    recording.append(step)          # commit immediately — overlay is deliberate
-                    cmd = "overlay_done"
-                elif action is not None and action["kind"] == "seal":
-                    print(f">>> SEAL: value='{action['value']}' target={action['target']}")
-                    if action["value"] != "":
-                        t = action["target"] or {}
-                        step = {"action": "type", "id": t.get("id",""), "name": t.get("name",""),
-                                "role": "", "tag": t.get("tag",""),
-                                "value": action["value"], "mode": action["mode"], "enter": False}
-                        recording.append(step)      # commit immediately
-                    cmd = "overlay_done"
-                elif action is not None and action["kind"] == "press":
-                    step = {"action": "press", "value": action["value"]}
-                    recording.append(step)          # commit immediately
-                    cmd = "overlay_done"
+            elif click_info is not None:
+                step = {"action": "click", "id": click_info.get("id",""), "name": click_info.get("name",""),
+                        "role": click_info.get("role",""), "tag": click_info.get("tag","")}
+                recording.append(step)
+                cmd = "overlay_done"
+            elif action is not None and action["kind"] == "seal":
+                print(f">>> SEAL: value='{action['value']}' target={action['target']}")
+                if action["value"] != "":
+                    t = action["target"] or {}
+                    step = {"action": "type", "id": t.get("id",""), "name": t.get("name",""),
+                            "role": "", "tag": t.get("tag",""),
+                            "value": action["value"], "mode": action["mode"], "enter": False}
+                    recording.append(step)
+                cmd = "overlay_done"
+            elif action is not None and action["kind"] == "press":
+                step = {"action": "press", "value": action["value"]}
+                recording.append(step)
+                cmd = "overlay_done"
         else:
             ai_cmd = ask_llm(elements, goal, history[-5:]).strip()
             if ai_cmd.startswith("nav"):

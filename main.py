@@ -2,10 +2,10 @@
 from playwright.sync_api import sync_playwright
 from loop import run_loop
 from replay import replay
+from overlay import click_queue
 
-def on_badge_click(index):
-         print(f"badge {index} clicked")
-
+def on_badge_click(info):
+    click_queue.put(info)
 
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=False, args=["--start-maximized"])
