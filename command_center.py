@@ -9,7 +9,7 @@ def _run_window():
     root.title("Command Center")
     root.attributes("-topmost", True)
     root.configure(bg="#1e1e2e")
-    root.geometry("260x300")
+    root.geometry("260x560")
 
     tk.Label(root, text="COMMAND CENTER", bg="#1e1e2e", fg="#89b4fa",
              font=("Segoe UI", 12, "bold")).pack(pady=(14, 10))
@@ -20,6 +20,28 @@ def _run_window():
                          bg=color, fg="white", font=("Segoe UI", 11, "bold"),
                          relief="flat", width=22, height=2, cursor="hand2",
                          activebackground="#313244", activeforeground="white")
+
+    scroll_table_frame = tk.Frame(root, bg="#1e1e2e")
+    scroll_table_frame.pack(pady=(12, 4))
+    scroll_table_entry = tk.Entry(scroll_table_frame, width=20, bg="#313244", fg="white",
+                         insertbackground="white", relief="flat", font=("Segoe UI", 10))
+    scroll_table_entry.pack(pady=4, ipady=4)
+    scroll_table_entry.insert(0, "600")
+    tk.Button(scroll_table_frame, text="↓  SCROLL TABLE",
+              command=lambda: command_queue.put(f"scroll table {scroll_table_entry.get()}"),
+              bg="#8d1ef5", fg="white", font=("Segoe UI", 11, "bold"), relief="flat",
+              width=22, height=2, cursor="hand2").pack(pady=4)
+
+    scroll_page_frame = tk.Frame(root, bg="#1e1e2e")
+    scroll_page_frame.pack(pady=(12, 4))
+    scroll_page_entry = tk.Entry(scroll_page_frame, width=20, bg="#313244", fg="white",
+                         insertbackground="white", relief="flat", font=("Segoe UI", 10))
+    scroll_page_entry.pack(pady=4, ipady=4)
+    scroll_page_entry.insert(0, "600")
+    tk.Button(scroll_page_frame, text="↓  SCROLL PAGE",
+              command=lambda: command_queue.put(f"scroll page {scroll_page_entry.get()}"),
+              bg="#c9a800", fg="black", font=("Segoe UI", 11, "bold"), relief="flat",
+              width=22, height=2, cursor="hand2").pack(pady=4)
 
     styled(root, "✓  DONE", "done", "#40a02b").pack(pady=4)
     styled(root, "⏱  WAIT", "wait", "#df8e1d").pack(pady=4)

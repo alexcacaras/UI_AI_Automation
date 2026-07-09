@@ -35,6 +35,10 @@ NOTE: currently wraps click/type only. fill does NOT yet retry (known gap).
          (the 1s settle mirrors fill_by_name's searchselect race fix)
 - fill:  fill_by_name(page, name, value) — name-based, no find_by_id, has its own settle
 - press: page.keyboard.press(value) — no element
+- scroll: scroll(page, target, amount) — no element, no find, no retry. Re-runs the
+          same mechanism with recorded args. Pixel amounts are absolute, so a page
+          that renders differently on replay could land elsewhere; the retry-on-miss
+          around the NEXT click absorbs this in practice (proven).
 
 ## KEY BUG FOUND & FIXED: did_change went blind to id-less elements
 did_change compared SETS of ids. Oracle's date-picker (and other widgets) flood the

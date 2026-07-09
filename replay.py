@@ -1,6 +1,6 @@
 import json
 from perceive import perceive
-from actions import find_by_id, click, fill_by_name, find_by_name
+from actions import find_by_id, click, fill_by_name, find_by_name, scroll
 
 
 def replay(page):
@@ -67,5 +67,8 @@ def replay(page):
 
         elif step["action"] == "wait":
             page.wait_for_timeout(3000)
+        
+        elif step["action"] == "scroll":
+            scroll(page, step["target"], step["amount"])
 
         page.wait_for_timeout(3000)

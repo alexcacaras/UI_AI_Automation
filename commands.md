@@ -28,3 +28,14 @@
    Examples:
      fill Department | Mathematics
      fill What's the reason for this request? | New Position
+
+9. scroll <page|table> <amount> -> Scrolls to reveal elements not currently visible.
+   Elements below the fold are NOT in the element list — they have no index and cannot
+   be clicked until scrolled into view. Scroll first, then act on the new list.
+     page  = scrolls the whole browser window (use for long forms)
+     table = scrolls an inner data grid / results table (use when a table has more rows)
+   Amount is pixels. NEGATIVE scrolls UP. Amount is optional (default 600).
+   Examples:
+     scroll page 600      (down one screenful)
+     scroll page -600     (back up)
+     scroll table 400     (more rows in the results table)

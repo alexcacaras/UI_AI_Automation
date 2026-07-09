@@ -1,5 +1,5 @@
 from perceive import perceive
-from actions import click, fill_by_name, did_change, do_click, do_type_python, do_type_live
+from actions import click, fill_by_name, did_change, do_click, do_type_python, do_type_live, scroll
 from llm import ask_llm
 from actions import search_element
 import json
@@ -161,8 +161,15 @@ def run_loop(page, mode):
             elif cmd == "wait":
                 page.wait_for_timeout(3000)
                 recording.append({"action": "wait"})
+
+            elif cmd.startswith("scroll "):
+                parts = cmd.split()
+                target = parts[1]
+                amount = int(parts[2]) if len(parts) > 2 else 600
+                scroll(page, target, amount)
+                recording.append({"action": "scroll","target": target, "amount": amount})
             else:
-                print("didnt understand that - try: click 9 / type 9 hello / nav http://... / press Enter / wait / fill / done")
+                print("didnt understand that - try: click 9 / type 9 hello / nav http://... / press Enter / wait / fill / scroll / done")
             history.append({"cmd": cmd, "result": "pending"})
             print("recent:", history[-5:])
         except Exception as e:

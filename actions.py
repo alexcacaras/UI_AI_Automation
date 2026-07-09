@@ -98,3 +98,22 @@ def do_type_live(page, index, elements):
     el = search_element(elements, index)
     pending_step = {"action": "type", "id": el["id"], "name": el["name"], "role": el["role"], "tag": el["tag"], "value": text, "enter": False}
     return pending_step
+
+
+def scroll(page, target, amount):
+    if target == 'page':
+        page.evaluate("(amount) => window.scrollBy(0, amount)", amount)
+    elif target == 'table':
+        page.evaluate("""
+            (amount) => {
+            const cx = window.innerWidth / 2, cy = window.innerHeight / 2;
+            let el = document.elementFromPoint(cx, cy);
+            while (el && !(el.scrollHeight > el.clientHeight + 5 &&
+            ['auto','scroll'].includes(getComputedStyle(el).overflowY))) {
+            el = el.parentElement;
+            }
+            if (el) { el.scrollBy(0, amount); }
+            }
+        """, amount)
+    else:
+        print(f"unknown scroll target: {target}")

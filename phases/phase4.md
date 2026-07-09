@@ -85,6 +85,54 @@ replay.py handles nav (page.goto) and wait (wait_for_timeout).
 Full action set records AND replays: click, type (live+seal, replace/append), press,
 nav, wait. Overlay-authored recording replays deterministically via Phase 5.
 
+## 4c — Scroll (page + table)  DONE
+
+Below-the-fold elements are unreachable, not just unseen: perceive stamps only
+what's in the viewport, so an off-screen field has NO data-ai-index and cannot be
+clicked by any mode. Scroll makes elements ADDRESSABLE.
+
+Two mechanisms, both position-free (no mouse, no focus), in actions.scroll():
+- target=page  -> window.scrollBy(0, amount)
+- target=table -> walk UP from elementFromPoint(viewport center) to the nearest
+                  real scroller (scrollHeight > clientHeight+5 AND overflowY
+                  auto|scroll), then element.scrollBy(0, amount). Guarded with
+                  if(el) — walking off <html> yields null.
+Negative amount scrolls up. Default 600. Unknown target prints and no-ops.
+
+ELIMINATED (empirically, in DevTools/scratch — do not revisit):
+- page.mouse.wheel: scrolls whatever is under the CURSOR. Needed a click first for
+  the table, never moved the window. Position-dependence is fatal for autonomous
+  driving and for replay (nothing to record but a mouse position).
+- Blind querySelectorAll(...).find(scroller): returns the FIRST scroller in DOM
+  order, not the visible one. Set scrollTop to a number while the rows never moved.
+  Walk-up-from-center picks the one you're looking at.
+- CSS overflow property as a detector: the property filter returns [] on pages that
+  demonstrably scroll. The proxy is leaky. (The scroll EVENT, captured with
+  {capture:true}, names the true scroller — useful for diagnosis, useless for replay.)
+
+Recording: immediate-commit, alongside nav/wait — NOT via pending_step/did_change.
+Scroll ALWAYS changes the perceived element set (that is its entire purpose), so the
+verdict carries zero information, and parking it in that slot would steal the verdict
+belonging to the previous action.
+Record shape: {action: scroll, target: page|table, amount: N}
+The `target` field is what lets replay pick the right mechanism without guessing.
+
+Command center: one entry + one button per target (raw tk.Button, not styled(),
+because the command string is built at click-time from the entry via .get()).
+All three modes reach the SAME dispatch branch in loop.py — only the command SOURCE
+differs. Scroll was written once.
+
+PROVEN: overlay-authored run (page scrolls to reach "Show more quick actions" and an
+id-less "Positions" link, plus a table scroll on the results grid) replayed
+deterministically end to end.
+
+PARKED (edge case, never hit): walk-up-from-center assumes the scroller you want is
+under the viewport middle. A page with two STACKED inner scrollers could resolve the
+wrong one. First suspect if a future grid scrolls the wrong region.
+
+PARKED (recording noise): scroll records pixel amounts verbatim, so authoring fumbles
+(1800, then 600, 600, 600) replay faithfully. Works, but noisy — same "recording
+cleanliness" item already parked in phase5.md.
 ## 4b — Parked / known limits (next work)
 - SEARCHSELECT TIMING: type->Enter races Oracle's dropdown filter (Enter fires before
   the filtered option appears). A manual pause helps but is fragile. Real fix: for
@@ -93,9 +141,6 @@ nav, wait. Overlay-authored recording replays deterministically via Phase 5.
   `oj-searchselect-filter-...` input on focus, so the seal's activeElement grabs that
   transient id — should attribute the type to the last-CLICKED stable field id instead.
 - DATE PICKER: clicking calendar days crashes; workaround = type the date as text.
-- SCROLLING / below-the-fold: perceive only sees the viewport; PageDown records but
-  doesn't reliably scroll Oracle. Need scroll-and-re-perceive (mouse.wheel or container
-  scroll) to reach/record lower elements. Likely the highest-value next fix for long forms.
 - Single-slot _lastAction can drop an action if two happen within the 500ms poll (rare).
 - Multiple recordings: still one recording.json scratch file; key by test name later.
 - Remove the >>> SEAL debug print for a clean version.
