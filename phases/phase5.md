@@ -66,3 +66,34 @@ id-less <a> buttons resolved by name+tag on replay.
 - Phase 6 (healer): when find_by_id AND find_by_name both fail (element truly gone after
   a UI change), call the LLM to re-perceive and repair that step. find returning None
   is already the exact hook.
+
+
+
+# Phase 5b — Named recordings (multi-recording storage)
+
+GOAL: stop the single-file clobber. Each recording gets a name; replay picks by name.
+
+## What changed
+- main.py: prompts for a recording name after the mode choice; passes `name`
+  into run_loop (save) and replay (load).
+- run_loop(page, mode, name): saves to recordings/<name>.json
+  (os.makedirs("recordings", exist_ok=True) creates the folder once).
+- replay(page, name): loads recordings/<name>.json. If missing, lists available
+  recordings and re-prompts (blank = exit) rather than crashing on open().
+
+## Format decision
+Bare array, keyed by FILENAME — no envelope. Smallest change that doesn't corner
+us: when Phase 0's InstructionSet shape is needed (name/goal/ranked-locators for
+the healer), wrap the array in an object rather than converting one. Deferred until
+a field beyond `steps` is actually required.
+
+## Proven
+Recorded test1 and test2 separately (both files persist), replayed each by name,
+and a bad name lists options + re-prompts.
+
+## Parked
+- Overwrite on re-record is silent — recording the same name twice clobbers. Same
+  list+confirm pattern could guard it later.
+- Runs (ordered lists of recordings to replay in sequence — Phase 0 "Run" schema)
+  not built. This is single-recording replay only.
+- Recording cleanliness (fumbles replay verbatim) still open — carried from Phase 5.

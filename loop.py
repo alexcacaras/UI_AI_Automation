@@ -6,11 +6,12 @@ import json
 from overlay import draw_overlays, install_listener, click_queue
 from command_center import command_queue
 import queue
+import os
 
 #loop file
 
 
-def run_loop(page, mode):
+def run_loop(page, mode, name):
      done = False
      history = []
      previous_elements = None
@@ -145,12 +146,12 @@ def run_loop(page, mode):
                 if "|" not in rest:
                     print("usage: fill <field name> | <value>")
                 else:
-                    name, value = rest.split("|", 1)
-                    name = name.strip().strip('\'"')
+                    field_name, value = rest.split("|", 1)
+                    field_name = field_name.strip().strip('\'"')
                     value = value.strip().strip('\'"')
-                    fill_by_name(page, name, value)
+                    fill_by_name(page, field_name, value)
                     #fill_by_name(page, name.strip().strip('\'"'), value.strip().strip('\'"'))
-                    pending_step = {"action": "fill", "name": name, "value": value}
+                    pending_step = {"action": "fill", "name": field_name, "value": value}
 
             elif cmd.startswith("nav "):
                 url = cmd.split(maxsplit=1)[1]
@@ -186,6 +187,7 @@ def run_loop(page, mode):
             history.append({"cmd": cmd, "result": f"error: {str(e).splitlines()[0]}"})
             print("recent:", history[-5:])
 
-     with open("recording.json", "w") as f:
+     os.makedirs("recordings", exist_ok=True)
+     with open(f"recordings/{name}.json", "w") as f:
          json.dump(recording, f, indent=2)
-     print(f"saved {len(recording)} steps to recording.json")
+     print(f"saved {len(recording)} steps to recordings/{name}.json")

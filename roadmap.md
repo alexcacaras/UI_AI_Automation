@@ -81,4 +81,10 @@ other sets, variable definitions) as authored paths / Blocks.
 The person running it picks an instance + creds in a UI, picks a test, watches it
 run. Deterministic config-driven login feeds the logged-in page to the engine.
 
+
+### Future plan from this idea
+The idea is to have system for browser and desktop automation that an LLM can drive.
+Essentially creating a jarvis-esque systme on the laptop where all data belongs to you.
+This allows AI to know more about you (making it work better) and help you with any task 
+(this is future idea thtaa steps beyond just automating and record/replay with LLM)
 ---

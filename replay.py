@@ -1,10 +1,25 @@
 import json
+import os
 from perceive import perceive
 from actions import find_by_id, click, fill_by_name, find_by_name, scroll
 
 
-def replay(page):
-    with open("recording.json") as f:
+def replay(page, name):
+    path = f"recordings/{name}.json"
+    while not os.path.exists(path):
+        print(f"no recording named '{name}' in recordings/")
+        try:
+            available = [f[:-5] for f in os.listdir("recordings") if f.endswith(".json")]
+            print("available:", ", ".join(available) if available else "(none)")
+        except FileNotFoundError:
+            print("available: (no recordings folder yet)")
+        name = input("recording name (or blank to exit): ").strip()
+        if name == "":
+            print("exiting replay")
+            return
+        path = f"recordings/{name}.json"
+
+    with open(path) as f:
         recording = json.load(f)
 
     for step in recording:
