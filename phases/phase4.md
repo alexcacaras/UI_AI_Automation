@@ -176,6 +176,13 @@ FIX: keep activeElement (it genuinely IS the field being typed into) and normali
 id in elementInfo() by stripping the known prefix. Hardcodes an Oracle internal string;
 empirical, and it corrects a right signal rather than replacing it with a guessy one.
 
+- SEARCHSELECT TIMING (dormant, not open): was masked as a timing race but the real
+  cause was the ephemeral id (fixed in 4d) — the type step never ran. Now it runs, and
+  replay's per-step 3s settle covers the dropdown filter, so type->Enter (as SEPARATE
+  steps) works. STILL LATENT: the enter:true path only waits 1s; and if the 3s
+  per-step settle is ever tightened, the race returns. Reuse fill_by_name's
+  type->800ms->Enter pattern if that happens.
+
 ### The principle that fell out
 CAPTURE identity, not position. lastClickedBadge used to hold an INDEX that Python
 resolved against a possibly-stale `elements` list (perceive renumbers on every
@@ -191,10 +198,7 @@ no |hint, no proximity. So date/reason fields record name:"". Harmless while id 
 present; would bite an id-less element.
 
 ## Parked / known limits (next work)
-- SEARCHSELECT TIMING (still open): type->Enter races Oracle's dropdown filter. Real
-  fix: for role=combobox, replay should type full value -> wait ~800ms -> Enter (reuse
-  fill_by_name's proven pattern). Note the recorded type and press-Enter are SEPARATE
-  steps, so replay's `if step["enter"]` 1s settle never fires for overlay recordings.
+
 - find_by_name(name, tag) is ambiguous for id-less elements (the calendar has several
   cells named T/S). "14" replayed today, but a recording replayed next month points at
   a different date. Phase 0's ranked locators are the real answer.
