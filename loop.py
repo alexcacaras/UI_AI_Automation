@@ -188,6 +188,15 @@ def run_loop(page, mode, name):
             print("recent:", history[-5:])
 
      os.makedirs("recordings", exist_ok=True)
-     with open(f"recordings/{name}.json", "w") as f:
+     while True:
+         path = f"recordings/{name}.json"
+         if not os.path.exists(path):
+             break                                    # name is free, done
+         confirm = input(f"'{name}' exists — overwrite? (y/n): ").strip().lower()
+         if confirm == "y":
+             break                                    # user chose to overwrite, done
+         name = input("enter a new name: ").strip()   # otherwise loop with the new name
+
+     with open(path, "w") as f:
          json.dump(recording, f, indent=2)
      print(f"saved {len(recording)} steps to recordings/{name}.json")
