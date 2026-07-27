@@ -97,3 +97,28 @@ and a bad name lists options + re-prompts.
 - Runs (ordered lists of recordings to replay in sequence — Phase 0 "Run" schema)
   not built. This is single-recording replay only.
 - Recording cleanliness (fumbles replay verbatim) still open — carried from Phase 5.
+
+## 5c — Runs (replay multiple recordings in sequence)  DONE
+
+build_order() (runs.py): lists recordings/ numbered, user types order "2,3,1" at
+runtime -> ["test2","test3","test1"]. No file editing; ephemeral (not saved).
+run_suite(page, order): replays each in sequence with TWO layers of isolation:
+  - replay() now returns True (all steps done) / False (a step's locator not found).
+  - run_suite wraps each replay in try/except for UNEXPECTED crashes.
+  Either way: mark FAIL, continue to next test, print PASS/FAIL summary at end.
+main.py: new (r)un mode splits off before the name prompt (a Run has an order, not
+a single name).
+
+Purpose: dependency isolation. A recording that needs a prior recording's result
+fails contained — skip it, keep running the rest.
+
+Convention (not code): recording 2 should start with a click-home to reset to a
+known page, since it inherits whatever page recording 1 left behind.
+
+PARKED:
+- build_order has no input guard: "9" (out of range) -> IndexError, "abc" -> ValueError.
+- Runs are ephemeral; saving as runs/<name>.json is the next increment.
+- Login is still manual (pre-run). Automated session_setup reading ${creds} from .env
+  is Phase 0's design, deferred.
+- Results are terminal print only. A pytest-style dashboard (requested by a stakeholder)
+  is a reporting layer for later.

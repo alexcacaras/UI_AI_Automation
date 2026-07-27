@@ -60,7 +60,7 @@ def replay(page, name):
 
             if el is None:
                 print(f"couldn't find {step['name']} after retries, stopping")
-                break
+                return False
 
             if action == "click":
                 click(page, el["index"])
@@ -87,3 +87,4 @@ def replay(page, name):
             scroll(page, step["target"], step["amount"])
 
         page.wait_for_timeout(3000)
+    return True
