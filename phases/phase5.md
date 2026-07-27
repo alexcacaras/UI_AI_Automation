@@ -94,8 +94,6 @@ and a bad name lists options + re-prompts.
 ## Parked
 - Overwrite on re-record is silent — recording the same name twice clobbers. Same
   list+confirm pattern could guard it later.
-- Runs (ordered lists of recordings to replay in sequence — Phase 0 "Run" schema)
-  not built. This is single-recording replay only.
 - Recording cleanliness (fumbles replay verbatim) still open — carried from Phase 5.
 
 ## 5c — Runs (replay multiple recordings in sequence)  DONE
