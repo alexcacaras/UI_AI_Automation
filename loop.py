@@ -11,7 +11,7 @@ import os
 #loop file
 
 
-def run_loop(page, mode, name):
+def run_loop(page, mode, name, goal):
      done = False
      history = []
      previous_elements = None
@@ -56,7 +56,7 @@ def run_loop(page, mode, name):
 
         previous_elements = elements
         #cmd = input("\naction? (click N / type N text / nav URL / press N / wait / fill / done):").strip()
-        goal = "Open the Navigator and go to My Client Groups and then go to Workforce Structures. You are done when the page shows Workforce Structures items like 'Positions', 'Jobs', and 'Request a New Position' — when you see those, respond with: done"
+        #goal = "Open the Navigator and go to My Client Groups and then go to Workforce Structures. You are done when the page shows Workforce Structures items like 'Positions', 'Jobs', and 'Request a New Position' — when you see those, respond with: done"
         if mode == "manual":
             #page.wait_for_timeout(500)
             draw_overlays(page)
@@ -197,6 +197,7 @@ def run_loop(page, mode, name):
              break                                    # user chose to overwrite, done
          name = input("enter a new name: ").strip()   # otherwise loop with the new name
 
+     envelope = {"name": name, "goal": goal, "steps": recording}
      with open(path, "w") as f:
-         json.dump(recording, f, indent=2)
+         json.dump(envelope, f, indent=2)
      print(f"saved {len(recording)} steps to recordings/{name}.json")

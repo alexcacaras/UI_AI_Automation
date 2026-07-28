@@ -20,18 +20,20 @@ with sync_playwright() as p:
     if mode == "r":
         order = build_order()
         run_suite(page, order)
+    elif mode == "p":
+        name = input("recording name: ").strip()
+        replay(page, name)
     else:
         name = input("recording name: ").strip()
-        if mode == "p":
-            replay(page, name)
-        elif mode == "m":
-            run_loop(page, "manual", name)
+        goal = input("goal for this recording (one line): ").strip()
+        if mode == "m":
+            run_loop(page, "manual", name, goal)
         elif mode == "o":
             from command_center import start_command_center
             start_command_center()
-            run_loop(page, "overlay", name)
+            run_loop(page, "overlay", name, goal)
         else:
-            run_loop(page, "ai", name)
+            run_loop(page, "ai", name, goal)
 
     input("press enter to close")
     browser.close()

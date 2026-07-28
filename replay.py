@@ -20,7 +20,14 @@ def replay(page, name):
         path = f"recordings/{name}.json"
 
     with open(path) as f:
-        recording = json.load(f)
+        data = json.load(f)
+    # tolerate both shapes: new envelope {name, goal, steps} or old bare array
+    if isinstance(data, dict):
+        recording = data["steps"]
+        goal = data.get("goal", "")
+    else:
+        recording = data          # old bare-array recording
+        goal = ""
 
     for step in recording:
         page.wait_for_load_state("domcontentloaded")
