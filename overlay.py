@@ -48,10 +48,16 @@ def install_listener(page):
                 let id = el.id || '';
                 const P = 'oj-searchselect-filter-';
                 if (id.startsWith(P)) { id = id.slice(P.length); }
+                let name = el.getAttribute('aria-label') || el.getAttribute('title') ||
+                        el.getAttribute('placeholder') || '';
+                if (!name) {
+                    const img = el.querySelector('img');
+                    if (img) name = img.getAttribute('alt') || img.getAttribute('title') || '';
+                }
+                if (!name) name = el.innerText || '';
                 return {
                     id: id,
-                    name: el.getAttribute('aria-label') || el.getAttribute('title') ||
-                        el.getAttribute('placeholder') || el.innerText || '',
+                    name: name,
                     tag: el.tagName.toLowerCase(),
                     role: el.getAttribute('role') || ''
                 };

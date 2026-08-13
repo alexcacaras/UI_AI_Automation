@@ -12,7 +12,7 @@ with sync_playwright() as p:
     browser = p.chromium.launch(headless=False, args=["--start-maximized"])
     page = browser.new_page(no_viewport=True)
     page.expose_function("badgeClicked", on_badge_click)
-    page.goto("https://fa-euum-dev2-saasfaprod1.fa.ocs.oraclecloud.com")
+    page.goto("")
     input("Log in manually in the browser, then press Enter here and choose the mode...")
 
     mode = input("(a)i / (m)anual / (o)verlay / (p)layback / (r)un: ").strip().lower()

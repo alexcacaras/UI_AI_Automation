@@ -15,6 +15,13 @@ def perceive(page):
                 // 1. direct attributes
                 let name = el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('placeholder') || '';
 
+
+                // 1.5 icon buttons: the action name lives on a child <img>'s alt/title
+                if (!name) {
+                    const img = el.querySelector('img');
+                    if (img) name = img.getAttribute('alt') || img.getAttribute('title') || '';
+                }
+
                 // 2. aria-labelledby: label text lives in another element, referenced by id
                 if (!name) {
                     const labelledBy = el.getAttribute('aria-labelledby');
@@ -87,8 +94,16 @@ def perceive(page):
             document.querySelectorAll(ACTIONABLE).forEach(el => {
                 if (!isVisible(el)) return;
                 if (!isClickable(el)) return; 
-                const name = getName(el);
-                if (!name) return;
+                let name = getName(el);
+                if (!name) {
+                    const tag = el.tagName.toLowerCase();
+                    const role = el.getAttribute('role') || '';
+                    if (tag === 'input' || tag === 'textarea' || role === 'textbox' || role === 'combobox') {
+                        name = 'text field';
+                    } else {
+                        return;
+                    }
+                }
 
                 n = n + 1;
                 el.setAttribute('data-ai-index', String(n));

@@ -120,3 +120,20 @@ PARKED:
   is Phase 0's design, deferred.
 - Results are terminal print only. A pytest-style dashboard (requested by a stakeholder)
   is a reporting layer for later.
+
+
+  ## 5d — Perceive/naming fixes (partial)
+
+Classic Oracle pages (setup + maintenance) had buttons/fields no mode could click —
+they got no badge because getName() returned "".
+
+Causes + fixes:
+- Icon buttons (+ Create, Export) are <a> wrapping only an <img>; the name lives in
+  the img's `alt`. Added img-alt fallback to perceive.getName AND overlay.elementInfo.
+  (Two naming functions — a fix must go in both or record/replay disagree.)
+- Some inputs (setup search box) are genuinely nameless but have ids. Stamping loop now
+  rescues nameless input/textbox/combobox as "text field" instead of dropping them.
+
+New bug: setup search magnifier has id:"" and shares name "Search" with the top-nav
+one, so find_by_name clicks the wrong one. Workaround: press Enter to search (confirmed).
+Real fix: ranked locators — promoted from Phase 0 parked to active.
