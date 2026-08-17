@@ -39,3 +39,14 @@
      scroll page 600      (down one screenful)
      scroll page -600     (back up)
      scroll table 400     (more rows in the results table)
+
+10. select N value -> Choose an option from a NATIVE dropdown (a <select> element).
+    N is the index number from the element list; the element's tag must be "select".
+    `value` is the visible option text to choose, exactly as it appears in the dropdown.
+    Use this for standard OS dropdowns (Country, State, Purpose, etc.) — NOT for
+    Oracle's type-to-filter comboboxes (use type/fill for those).
+    The value can contain spaces; write it plainly after the index.
+    Examples:
+      select 56 Sold to
+      select 12 Canada
+      select 8 Bill to

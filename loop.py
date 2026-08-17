@@ -1,7 +1,7 @@
 from perceive import perceive
 from actions import click, fill_by_name, did_change, do_click, do_type_python, do_type_live, scroll
 from llm import ask_llm
-from actions import search_element
+from actions import search_element, select_option_forgiving
 import json
 from overlay import draw_overlays, install_listener, click_queue
 from command_center import command_queue
@@ -52,6 +52,8 @@ def run_loop(page, mode, name, goal):
                     recording.append(pending_step)
                 elif pending_step["action"] == "fill":
                     recording.append(pending_step)
+                elif pending_step["action"] == "select":
+                    recording.append(pending_step)
                 pending_step = None
 
         previous_elements = elements
@@ -60,7 +62,7 @@ def run_loop(page, mode, name, goal):
         if mode == "manual":
             #page.wait_for_timeout(500)
             draw_overlays(page)
-            cmd = input("\naction? (click N / type N text / nav URL / press N / wait / fill / done):").strip()
+            cmd = input("\naction? (click N / type N text / nav URL / press N / wait / fill / select / done):").strip()
         elif mode == "overlay":
             draw_overlays(page)
             install_listener(page)
@@ -178,6 +180,17 @@ def run_loop(page, mode, name, goal):
                 amount = int(parts[2]) if len(parts) > 2 else 600
                 scroll(page, target, amount)
                 recording.append({"action": "scroll","target": target, "amount": amount})
+
+            elif cmd.startswith("select "):
+                parts = cmd.split(maxsplit=2)      # ["select", "N", "Sold to"]
+                index = int(parts[1])
+                value = parts[2]
+                # act: set the select
+                select_option_forgiving(page, index, value)
+                # record: capture the element's identity
+                el = search_element(elements, index)
+                pending_step = {"action": "select", "id": el["id"], "name": el["name"],
+                                "role": el["role"], "tag": el["tag"], "value": value}
             else:
                 print("didnt understand that - try: click 9 / type 9 hello / nav http://... / press Enter / wait / fill / scroll / done")
             history.append({"cmd": cmd, "result": "pending"})

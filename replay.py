@@ -1,7 +1,7 @@
 import json
 import os
 from perceive import perceive
-from actions import find_by_id, click, fill_by_name, find_by_name, scroll
+from actions import find_by_id, click, fill_by_name, find_by_name, scroll,  select_option_forgiving
 
 
 def replay(page, name):
@@ -92,6 +92,13 @@ def replay(page, name):
         
         elif step["action"] == "scroll":
             scroll(page, step["target"], step["amount"])
+
+        elif action == "select":
+            el = find_by_id(elements, step["id"])
+            if el is None:
+                print(f"couldn't find select {step['name']}, stopping")
+                return False
+            select_option_forgiving(page, el["index"], step["value"])
 
         page.wait_for_timeout(3000)
     return True

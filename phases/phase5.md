@@ -136,4 +136,4 @@ Causes + fixes:
 
 New bug: setup search magnifier has id:"" and shares name "Search" with the top-nav
 one, so find_by_name clicks the wrong one. Workaround: press Enter to search (confirmed).
-Real fix: ranked locators — promoted from Phase 0 parked to active.
+Real fix: ranked locators — promoted from Phase 0 parked to active. 

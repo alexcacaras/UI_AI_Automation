@@ -117,3 +117,17 @@ def scroll(page, target, amount):
         """, amount)
     else:
         print(f"unknown scroll target: {target}")
+
+def select_option_forgiving(page, index, value):
+    locator = page.locator(f'[data-ai-index="{index}"]')
+    try:
+        locator.select_option(label=value)          # exact match first
+    except Exception:
+        # fall back: case-insensitive match against the option texts
+        options = locator.evaluate("""el =>
+            [...el.options].map(o => o.text.trim())
+        """)
+        match = next((o for o in options if o.lower() == value.strip().lower()), None)
+        if match is None:
+            raise Exception(f"no option matching '{value}' (options: {options})")
+        locator.select_option(label=match)
