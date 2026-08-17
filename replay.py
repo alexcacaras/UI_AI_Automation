@@ -2,7 +2,11 @@ import json
 import os
 from perceive import perceive
 from actions import find_by_id, click, fill_by_name, find_by_name, scroll,  select_option_forgiving
-
+import shutil
+from report import build_doc
+from dotenv import load_dotenv
+load_dotenv()
+SCREENSHOTS = os.getenv("SCREENSHOTS", "off").lower() == "on"
 
 def replay(page, name):
     path = f"recordings/{name}.json"
@@ -29,6 +33,12 @@ def replay(page, name):
         recording = data          # old bare-array recording
         goal = ""
 
+    shots = []                                        # just image paths, in order
+    if SCREENSHOTS:
+        shot_dir = f"recordings/docs/{name}"
+        if os.path.exists(shot_dir):
+            shutil.rmtree(shot_dir)                   # clear old shots (handles fewer-steps case)
+        os.makedirs(shot_dir, exist_ok=True)
     for step in recording:
         page.wait_for_load_state("domcontentloaded")
         try:
@@ -100,5 +110,14 @@ def replay(page, name):
                 return False
             select_option_forgiving(page, el["index"], step["value"])
 
+        if SCREENSHOTS:                                           
+                page.wait_for_timeout(500)
+                img_path = f"{shot_dir}/step_{len(shots)+1}.png"
+                page.screenshot(path=img_path)
+                shots.append(img_path)
+
         page.wait_for_timeout(3000)
+
+    if SCREENSHOTS and shots:                                   
+        build_doc(name, shots)
     return True

@@ -137,3 +137,36 @@ Causes + fixes:
 New bug: setup search magnifier has id:"" and shares name "Search" with the top-nav
 one, so find_by_name clicks the wrong one. Workaround: press Enter to search (confirmed).
 Real fix: ranked locators — promoted from Phase 0 parked to active. 
+
+## 5e — Native <select> support
+
+Native <select> dropdowns (Country, State, Purpose — common on classic pages, rare on
+Redwood) couldn't replay: recording captured a click, but a synthetic click doesn't open
+the OS-native dropdown, so the option was never picked. Fix: drive selects with
+select_option, not click.
+
+- New "select" action: {id, name, tag, value}. value = the option's VISIBLE TEXT
+  ("Sold to") — the internal value is just a reorderable index.
+- select_option_forgiving: exact match, then case-insensitive fallback (fixes "Sold To"
+  vs "Sold to"; also turns a 30s timeout into an instant error).
+- Manual: `select N value` (maxsplit=2 keeps spaces).
+- Overlay: a 'change' listener auto-records the pick; click handler SKIPS <select> so
+  it's one clean step, not doubled click+select.
+- Recorded on "didn't error" (like type/fill), not gated on "changed".
+
+Not searchselect — that's oj-select-single, a different widget; its patterns don't apply.
+Grid-row note: select ids contain the row index. Multi-row works if the "Add Row" clicks
+are recorded (replay rebuilds rows in order). Pre-existing rows would break — deferred.
+PROVEN: manual + overlay, single/two-row, case-tolerant replay.
+
+## 5f — Screenshot report (Word doc on replay)
+
+Replay can output a .docx: heading = test name, then one screenshot per step in order.
+Simple by design — no step labels.
+
+- .env SCREENSHOTS=on/off (default off, so bug-hunting stays fast).
+- Shot AFTER each step, viewport only, 500ms settle.
+- Output: recordings/docs/<testname>/<testname>.docx.
+- Folder wiped each run, so re-replay overwrites cleanly.
+- build_doc in report.py. Dep: python-docx (add to setup.bat verify).
+- Only builds on success; a failed replay makes no doc.
