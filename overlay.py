@@ -65,13 +65,23 @@ def install_listener(page):
 
             window._overlayClickHandler = (e) => {
                 const el = e.target.closest('[data-ai-index]');
-                if (el) {
+                if (el && el.tagName.toLowerCase() !== 'select') {
                     const info = window.elementInfo(el);
                     window._lastClickedElement = info;
                     window.badgeClicked(info);
                 }
             };
             document.addEventListener('click', window._overlayClickHandler, true);
+
+            window._overlayChangeHandler = (e) => {
+                const el = e.target.closest('[data-ai-index]');
+                if (el && el.tagName.toLowerCase() === 'select') {
+                    const info = window.elementInfo(el);
+                    info.value = el.options[el.selectedIndex].text.trim();
+                    window._lastAction = { kind: 'select', target: info };
+                }
+            };
+            document.addEventListener('change', window._overlayChangeHandler, true);
 
             window._overlayHandler = (e) => {
                 const k = e.key;

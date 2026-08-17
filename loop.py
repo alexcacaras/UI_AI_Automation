@@ -117,10 +117,16 @@ def run_loop(page, mode, name, goal):
                 step = {"action": "press", "value": action["value"]}
                 recording.append(step)
                 cmd = "overlay_done"
+            elif action is not None and action["kind"] == "select":
+                t = action["target"]
+                step = {"action": "select", "id": t.get("id",""), "name": t.get("name",""),
+                        "role": t.get("role",""), "tag": t.get("tag",""), "value": t.get("value","")}
+                recording.append(step)
+                cmd = "overlay_done"
         else:
             ai_cmd = ask_llm(elements, goal, history[-5:]).strip()
             if ai_cmd.startswith("nav"):
-                ai_cmd = "nav https://fa-euum-test-saasfaprod1.fa.ocs.oraclecloud.com"
+                ai_cmd = "nav (insert url))"
             print(f"\n AI wants to:{ai_cmd}")
             cmd = input("Press Enter to run it, or type your own command to override: ").strip()
             if cmd == "":
