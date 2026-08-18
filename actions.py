@@ -115,6 +115,23 @@ def scroll(page, target, amount):
             if (el) { el.scrollBy(0, amount); }
             }
         """, amount)
+    elif target == 'navigator':
+        page.evaluate("""
+            (amount) => {
+            const el = document.querySelector('[id*="_UISnvr"][id*="nv_pgl"]');
+            if (el && el.scrollHeight > el.clientHeight + 5) {
+                el.scrollBy(0, amount);
+            } else {
+                const nav = document.querySelector('[id*="_UISnvr"]');
+                if (nav) {
+                    const scroller = [...nav.querySelectorAll('*')].find(e =>
+                        e.scrollHeight > e.clientHeight + 5 &&
+                        ['auto','scroll'].includes(getComputedStyle(e).overflowY));
+                    if (scroller) scroller.scrollBy(0, amount);
+                }
+            }
+            }
+        """, amount)
     else:
         print(f"unknown scroll target: {target}")
 

@@ -24,16 +24,24 @@ with sync_playwright() as p:
         name = input("recording name: ").strip()
         replay(page, name)
     else:
-        name = input("recording name: ").strip()
-        goal = input("goal for this recording (one line): ").strip()
-        if mode == "m":
-            run_loop(page, "manual", name, goal)
-        elif mode == "o":
+        # start the command center ONCE for overlay (persists across recordings)
+        if mode == "o":
             from command_center import start_command_center
             start_command_center()
-            run_loop(page, "overlay", name, goal)
-        else:
-            run_loop(page, "ai", name, goal)
+
+        while True:
+            name = input("\nrecording name: ").strip()
+            goal = input("goal for this recording (one line): ").strip()
+            if mode == "m":
+                run_loop(page, "manual", name, goal)
+            elif mode == "o":
+                run_loop(page, "overlay", name, goal)
+            else:
+                run_loop(page, "ai", name, goal)
+
+            again = input("\nsaved. record another? (y/n): ").strip().lower()
+            if again != "y":
+                break
 
     input("press enter to close")
     browser.close()

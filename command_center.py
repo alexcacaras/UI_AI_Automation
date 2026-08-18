@@ -43,6 +43,17 @@ def _run_window():
               bg="#c9a800", fg="black", font=("Segoe UI", 11, "bold"), relief="flat",
               width=22, height=2, cursor="hand2").pack(pady=4)
 
+    scroll_nav_frame = tk.Frame(root, bg="#1e1e2e")
+    scroll_nav_frame.pack(pady=(12, 4))
+    scroll_nav_entry = tk.Entry(scroll_nav_frame, width=20, bg="#313244", fg="white",
+                         insertbackground="white", relief="flat", font=("Segoe UI", 10))
+    scroll_nav_entry.pack(pady=4, ipady=4)
+    scroll_nav_entry.insert(0, "600")
+    tk.Button(scroll_nav_frame, text="↓  SCROLL NAV",
+              command=lambda: command_queue.put(f"scroll navigator {scroll_nav_entry.get()}"),
+              bg="#179299", fg="white", font=("Segoe UI", 11, "bold"), relief="flat",
+              width=22, height=2, cursor="hand2").pack(pady=4)
+
     styled(root, "✓  DONE", "done", "#40a02b").pack(pady=4)
     styled(root, "⏱  WAIT", "wait", "#df8e1d").pack(pady=4)
 

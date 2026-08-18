@@ -60,13 +60,20 @@ def run_loop(page, mode, name, goal):
         #cmd = input("\naction? (click N / type N text / nav URL / press N / wait / fill / done):").strip()
         #goal = "Open the Navigator and go to My Client Groups and then go to Workforce Structures. You are done when the page shows Workforce Structures items like 'Positions', 'Jobs', and 'Request a New Position' — when you see those, respond with: done"
         if mode == "manual":
-            #page.wait_for_timeout(500)
-            draw_overlays(page)
+            try:
+                #page.wait_for_timeout(500)
+                draw_overlays(page)
+            except Exception as e:
+                    print(f"page moving, re-perceiving: {e}")
+                    continue
             cmd = input("\naction? (click N / type N text / nav URL / press N / wait / fill / select / done):").strip()
         elif mode == "overlay":
-            draw_overlays(page)
-            install_listener(page)
-
+            try:
+                draw_overlays(page)
+                install_listener(page)
+            except Exception as e:
+                print(f"page moving, re-perceiving: {e}")
+                continue
             cc_cmd = None
             click_info = None
             action = None

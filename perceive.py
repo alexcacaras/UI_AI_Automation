@@ -3,7 +3,7 @@
 def perceive(page):
         elements = page.evaluate("""
         () => {
-            const ACTIONABLE = 'a,button,input,select,textarea,[role="button"],[role="link"],[role="tab"],[role="textbox"],[role="combobox"],[role="menuitem"],[role="checkbox"],[role="option"],div[id*="groupNode"],div[id*="nvgpgl"]';
+            const ACTIONABLE = 'a,button,input,select,textarea,[role="button"],[role="link"],[role="tab"],[role="textbox"],[role="combobox"],[role="menuitem"],[role="checkbox"],[role="option"],div[id*="groupNode"],div[id*="nvgpgl"],li.FndSearchSuggestLIItem';
 
             function isVisible(el) {
                 const s = getComputedStyle(el);
