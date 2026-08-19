@@ -14,6 +14,7 @@ import os
 def run_loop(page, mode, name, goal):
      done = False
      history = []
+     finish_signal = "exit"
      previous_elements = None
      recording = []
      pending_step = None
@@ -139,8 +140,12 @@ def run_loop(page, mode, name, goal):
             if cmd == "":
                 cmd = ai_cmd
         try:
-            if cmd == "done":
+            if cmd == "done" or cmd == "done_exit":
                 done = True
+                finish_signal = "exit"
+            elif cmd == "done_new":
+                done = True
+                finish_signal = "new"
             elif cmd == "overlay_done":
                 pass
             elif cmd.startswith("click "):
@@ -227,3 +232,4 @@ def run_loop(page, mode, name, goal):
      with open(path, "w") as f:
          json.dump(envelope, f, indent=2)
      print(f"saved {len(recording)} steps to recordings/{name}.json")
+     return finish_signal

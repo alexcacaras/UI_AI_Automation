@@ -4,6 +4,7 @@ from loop import run_loop
 from replay import replay
 from overlay import click_queue
 from runs import build_order, run_suite
+from command_center import get_recording_info
 
 def on_badge_click(info):
     click_queue.put(info)
@@ -30,18 +31,19 @@ with sync_playwright() as p:
             start_command_center()
 
         while True:
-            name = input("\nrecording name: ").strip()
-            goal = input("goal for this recording (one line): ").strip()
-            if mode == "m":
-                run_loop(page, "manual", name, goal)
-            elif mode == "o":
-                run_loop(page, "overlay", name, goal)
-            else:
-                run_loop(page, "ai", name, goal)
-
-            again = input("\nsaved. record another? (y/n): ").strip().lower()
-            if again != "y":
+            name, goal = get_recording_info()
+            if not name:
                 break
+            if mode == "m":
+                signal = run_loop(page, "manual", name, goal)
+            elif mode == "o":
+                signal = run_loop(page, "overlay", name, goal)
+            else:
+                signal = run_loop(page, "ai", name, goal)
+
+            if signal == "exit":
+                break
+                # signal == "new" → loop again for the next recording
 
     input("press enter to close")
     browser.close()
