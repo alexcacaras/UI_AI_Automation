@@ -11,7 +11,7 @@ import os
 #loop file
 
 
-def run_loop(page, mode, name, goal):
+def run_loop(page, mode, name, goal, interactive=True):
      done = False
      history = []
      finish_signal = "exit"
@@ -219,17 +219,25 @@ def run_loop(page, mode, name, goal):
             print("recent:", history[-5:])
 
      os.makedirs("recordings", exist_ok=True)
-     while True:
-         path = f"recordings/{name}.json"
-         if not os.path.exists(path):
-             break                                    # name is free, done
-         confirm = input(f"'{name}' exists — overwrite? (y/n): ").strip().lower()
-         if confirm == "y":
-             break                                    # user chose to overwrite, done
-         name = input("enter a new name: ").strip()   # otherwise loop with the new name
+     path = f"recordings/{name}.json"
 
-     envelope = {"name": name, "goal": goal, "steps": recording}
+    # Terminal mode keeps overwrite confirmation.
+     # Web mode never waits for terminal input.
+     if os.path.exists(path) and interactive:
+         answer = input(f"'{name}' exists — overwrite? (y/n): ").strip().lower()
+
+         if answer != "y":
+             print("recording not saved")
+             return finish_signal
+
+     envelope = {
+         "name": name,
+         "goal": goal,
+         "steps": recording
+     }
+
      with open(path, "w") as f:
          json.dump(envelope, f, indent=2)
+
      print(f"saved {len(recording)} steps to recordings/{name}.json")
      return finish_signal
