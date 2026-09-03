@@ -72,6 +72,50 @@ def find_by_grid(elements, grid, row, column):
             return el
     return None
 
+def resolve(elements, step):
+    """Find the element a recorded step means, trying locators TIGHT to LOOSE.
+
+    Returns (element_or_None, rank) where rank says HOW it matched. replay logs
+    that, so a locator degrading from 'id' to 'name+tag' is visible BEFORE the
+    day it fails outright.
+
+        1  grid      {grid, row, column}   unique by construction
+        2  id        exact id
+        3  name+tag  EXACTLY ONE candidate
+        4  name+tag  first of several — a guess, logged loudly
+
+    Falling through is the whole point: today a step with an id that no longer
+    exists (ui-id-N renumbers every session) fails outright, even when its name
+    would have found it. This can only find MORE than before — a step that
+    resolves on rank 1 or 2 never reaches the lower ranks.
+
+    Rank 4 is where the two "Search" magnifiers live. Today find_by_name silently
+    returns the first of them; here the guess is at least reported. If rank 4
+    starts showing up in real runs, that is the evidence for adding a scope_id
+    rank rather than guessing at one now.
+    """
+    if step.get("grid"):
+        el = find_by_grid(elements, step["grid"], step.get("row"), step.get("column"))
+        if el is not None:
+            return el, "grid"
+
+    if step.get("id"):
+        el = find_by_id(elements, step["id"])
+        if el is not None:
+            return el, "id"
+
+    name = step.get("name", "")
+    tag = step.get("tag", "")
+    if name:
+        matches = [e for e in elements if e["name"] == name and e["tag"] == tag]
+        if len(matches) == 1:
+            return matches[0], "name+tag"
+        if len(matches) > 1:
+            return matches[0], f"GUESS name+tag ({len(matches)} candidates)"
+
+    return None, "no match"
+
+
 def scroll_grid_h(page, grid, amount):
     """Scroll a data grid's day columns sideways, or reset to the far left.
 
@@ -219,6 +263,26 @@ def scroll(page, target, amount):
             }
             }
         """, amount)
+    elif target == 'grid':
+        # HORIZONTAL — the only sideways scroller. Oracle data grids (time card)
+        # scroll their day columns in <grid>:databody; the frozen columns
+        # (Assignment, Time Type) sit in a separate scroller and don't move.
+        # Positive = right, negative = left.
+        # Needed at RECORD time: the grid is virtualized, so off-screen columns
+        # aren't in the DOM and get no badge until you scroll to them. Replay
+        # scrolls on its own (see find_by_grid), but the recorder can't.
+        moved = page.evaluate("""
+            (amount) => {
+                const g = document.querySelector('oj-data-grid');
+                if (!g || !g.id) return false;
+                const body = document.getElementById(g.id + ':databody');
+                if (!body) return false;
+                body.scrollBy(amount, 0);
+                return true;
+            }
+        """, amount)
+        if not moved:
+            print("no oj-data-grid on this page")
     else:
         print(f"unknown scroll target: {target}")
 

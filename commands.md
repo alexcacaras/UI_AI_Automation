@@ -29,16 +29,23 @@
      fill Department | Mathematics
      fill What's the reason for this request? | New Position
 
-9. scroll <page|table> <amount> -> Scrolls to reveal elements not currently visible.
+9. scroll <page|table|navigator|grid> <amount> -> Scrolls to reveal elements not currently visible.
    Elements below the fold are NOT in the element list — they have no index and cannot
    be clicked until scrolled into view. Scroll first, then act on the new list.
-     page  = scrolls the whole browser window (use for long forms)
-     table = scrolls an inner data grid / results table (use when a table has more rows)
-   Amount is pixels. NEGATIVE scrolls UP. Amount is optional (default 600).
+     page      = scrolls the whole browser window (use for long forms)
+     table     = scrolls an inner data grid / results table (use when a table has more rows)
+     navigator = scrolls the Navigator side panel
+     grid      = scrolls an Oracle data grid SIDEWAYS (time card day columns).
+                 This is the only HORIZONTAL target: positive = right, negative = left.
+                 Time card day columns beyond the visible ones are not rendered at
+                 all, so they have no index until you scroll to them.
+   Amount is pixels. NEGATIVE scrolls UP (or LEFT, for grid). Amount is optional (default 600).
    Examples:
      scroll page 600      (down one screenful)
      scroll page -600     (back up)
      scroll table 400     (more rows in the results table)
+     scroll grid 600      (right, toward the later days of the period)
+     scroll grid -600     (back left, toward day 1)
 
 10. select N value -> Choose an option from a NATIVE dropdown (a <select> element).
     N is the index number from the element list; the element's tag must be "select".

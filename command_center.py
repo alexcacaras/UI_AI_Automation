@@ -43,68 +43,104 @@ def get_recording_info():
 
     return result["name"], result["goal"]
 
+BG = "#1e1e2e"
+FIELD = "#313244"
+
+
+def _scrollable(root):
+    """A vertically scrollable container.
+
+    tkinter has no scrolling Frame, so the standard trick is: put a Frame inside
+    a Canvas via create_window, and keep the canvas scrollregion synced to the
+    frame's real size. Without this the panel silently clips anything past the
+    window height — which is what hid FINISH and the NAV box.
+    """
+    outer = tk.Frame(root, bg=BG)
+    outer.pack(fill="both", expand=True)
+
+    canvas = tk.Canvas(outer, bg=BG, highlightthickness=0)
+    bar = tk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+    inner = tk.Frame(canvas, bg=BG)
+
+    # grow the scrollregion whenever the content changes size
+    inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+    window = canvas.create_window((0, 0), window=inner, anchor="nw")
+    # keep the inner frame as wide as the canvas so buttons stay centred
+    canvas.bind("<Configure>", lambda e: canvas.itemconfigure(window, width=e.width))
+
+    canvas.configure(yscrollcommand=bar.set)
+    canvas.pack(side="left", fill="both", expand=True)
+    bar.pack(side="right", fill="y")
+    canvas.bind_all("<MouseWheel>",
+                    lambda e: canvas.yview_scroll(int(-e.delta / 120), "units"))
+    return inner
+
+
 def _run_window():
     root = tk.Tk()
     root.title("Command Center")
     root.attributes("-topmost", True)
-    root.configure(bg="#1e1e2e")
-    root.geometry("260x560")
+    root.configure(bg=BG)
+    root.geometry("300x600")
+    root.minsize(280, 320)
 
-    tk.Label(root, text="COMMAND CENTER", bg="#1e1e2e", fg="#89b4fa",
-             font=("Segoe UI", 12, "bold")).pack(pady=(14, 10))
+    body = _scrollable(root)
 
-    def styled(parent, text, cmd_value, color):
+    tk.Label(body, text="COMMAND CENTER", bg=BG, fg="#89b4fa",
+             font=("Segoe UI", 12, "bold")).pack(pady=(12, 8))
+
+    def styled(parent, text, cmd_value, color, fg="white"):
         return tk.Button(parent, text=text,
                          command=lambda: command_queue.put(cmd_value),
-                         bg=color, fg="white", font=("Segoe UI", 11, "bold"),
-                         relief="flat", width=22, height=2, cursor="hand2",
+                         bg=color, fg=fg, font=("Segoe UI", 10, "bold"),
+                         relief="flat", width=24, height=2, cursor="hand2",
                          activebackground="#313244", activeforeground="white")
 
-    scroll_table_frame = tk.Frame(root, bg="#1e1e2e")
-    scroll_table_frame.pack(pady=(12, 4))
-    scroll_table_entry = tk.Entry(scroll_table_frame, width=20, bg="#313244", fg="white",
-                         insertbackground="white", relief="flat", font=("Segoe UI", 10))
-    scroll_table_entry.pack(pady=4, ipady=4)
-    scroll_table_entry.insert(0, "600")
-    tk.Button(scroll_table_frame, text="↓  SCROLL TABLE",
-              command=lambda: command_queue.put(f"scroll table {scroll_table_entry.get()}"),
-              bg="#8d1ef5", fg="white", font=("Segoe UI", 11, "bold"), relief="flat",
-              width=22, height=2, cursor="hand2").pack(pady=4)
+    # ---- scrolling ------------------------------------------------------
+    # ONE shared amount box for all four targets. Four separate boxes all
+    # reading "600" cost ~520px of height and pushed FINISH off screen.
+    tk.Label(body, text="scroll amount (px, negative = back)", bg=BG, fg="#94a3b8",
+             font=("Segoe UI", 8)).pack(pady=(4, 2))
+    amount = tk.Entry(body, width=10, bg=FIELD, fg="white", justify="center",
+                      insertbackground="white", relief="flat", font=("Segoe UI", 10))
+    amount.pack(ipady=3)
+    amount.insert(0, "600")
 
-    scroll_page_frame = tk.Frame(root, bg="#1e1e2e")
-    scroll_page_frame.pack(pady=(12, 4))
-    scroll_page_entry = tk.Entry(scroll_page_frame, width=20, bg="#313244", fg="white",
-                         insertbackground="white", relief="flat", font=("Segoe UI", 10))
-    scroll_page_entry.pack(pady=4, ipady=4)
-    scroll_page_entry.insert(0, "600")
-    tk.Button(scroll_page_frame, text="↓  SCROLL PAGE",
-              command=lambda: command_queue.put(f"scroll page {scroll_page_entry.get()}"),
-              bg="#c9a800", fg="black", font=("Segoe UI", 11, "bold"), relief="flat",
-              width=22, height=2, cursor="hand2").pack(pady=4)
+    def amt():
+        return amount.get().strip() or "600"
 
-    scroll_nav_frame = tk.Frame(root, bg="#1e1e2e")
-    scroll_nav_frame.pack(pady=(12, 4))
-    scroll_nav_entry = tk.Entry(scroll_nav_frame, width=20, bg="#313244", fg="white",
-                         insertbackground="white", relief="flat", font=("Segoe UI", 10))
-    scroll_nav_entry.pack(pady=4, ipady=4)
-    scroll_nav_entry.insert(0, "600")
-    tk.Button(scroll_nav_frame, text="↓  SCROLL NAV",
-              command=lambda: command_queue.put(f"scroll navigator {scroll_nav_entry.get()}"),
-              bg="#179299", fg="white", font=("Segoe UI", 11, "bold"), relief="flat",
-              width=22, height=2, cursor="hand2").pack(pady=4)
+    grid_f = tk.Frame(body, bg=BG)
+    grid_f.pack(pady=(8, 4))
 
-    styled(root, "✓  FINISH (save & exit)", "done_exit", "#40a02b").pack(pady=4)
-    styled(root, "➕  NEW RECORDING", "done_new", "#3b82f6").pack(pady=4)
-    styled(root, "⏱  WAIT", "wait", "#df8e1d").pack(pady=4)
+    def scroll_btn(text, target, color, r, c, fg="white"):
+        tk.Button(grid_f, text=text,
+                  command=lambda: command_queue.put(f"scroll {target} {amt()}"),
+                  bg=color, fg=fg, font=("Segoe UI", 9, "bold"), relief="flat",
+                  width=11, height=2, cursor="hand2").grid(row=r, column=c, padx=3, pady=3)
 
-    nav_frame = tk.Frame(root, bg="#1e1e2e")
-    nav_frame.pack(pady=(12, 4))
-    nav_entry = tk.Entry(nav_frame, width=20, bg="#313244", fg="white",
+    scroll_btn("↓ TABLE", "table", "#8d1ef5", 0, 0)
+    scroll_btn("↓ PAGE", "page", "#c9a800", 0, 1, fg="black")
+    scroll_btn("↓ NAV", "navigator", "#179299", 1, 0)
+    # Time card day columns run left-to-right and are virtualized: later days
+    # aren't in the DOM and get no badge until scrolled to. Only HORIZONTAL one.
+    scroll_btn("→ GRID", "grid", "#e64553", 1, 1)
+
+    tk.Frame(body, bg="#313244", height=1).pack(fill="x", padx=16, pady=(10, 6))
+
+    # ---- actions --------------------------------------------------------
+    styled(body, "✓  FINISH (save & exit)", "done_exit", "#40a02b").pack(pady=3)
+    styled(body, "➕  NEW RECORDING", "done_new", "#3b82f6").pack(pady=3)
+    styled(body, "⏱  WAIT", "wait", "#df8e1d").pack(pady=3)
+
+    tk.Frame(body, bg="#313244", height=1).pack(fill="x", padx=16, pady=(10, 6))
+
+    # ---- navigate -------------------------------------------------------
+    nav_entry = tk.Entry(body, width=26, bg=FIELD, fg="white",
                          insertbackground="white", relief="flat", font=("Segoe UI", 10))
-    nav_entry.pack(pady=4, ipady=4)
-    tk.Button(nav_frame, text="→  NAV", command=lambda: command_queue.put(f"nav {nav_entry.get()}"),
-              bg="#1e66f5", fg="white", font=("Segoe UI", 11, "bold"), relief="flat",
-              width=22, height=2, cursor="hand2").pack(pady=4)
+    nav_entry.pack(pady=(2, 4), ipady=4)
+    tk.Button(body, text="→  NAV", command=lambda: command_queue.put(f"nav {nav_entry.get()}"),
+              bg="#1e66f5", fg="white", font=("Segoe UI", 10, "bold"), relief="flat",
+              width=24, height=2, cursor="hand2").pack(pady=(0, 12))
 
     root.mainloop()
 

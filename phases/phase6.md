@@ -53,6 +53,20 @@ Design decisions (locked):
 - Return the whole element dict on success (replay works in el["index"]; and Act 2
   write-back will need the full id/name/tag).
 
+## STATUS UPDATE — the Act 2 blocker is gone
+
+Ranked locators are BUILT (phase5.md 5i). `actions.resolve(elements, step)` walks
+grid → id → name+tag(unique) → name+tag(guess) and returns WHICH rank matched, which
+changes two things for this phase.
+
+First, the healer fires less often and for better reasons: a step whose id went stale now
+recovers on name+tag instead of failing, so a heal request means the locator genuinely
+lost the element rather than "the id renumbered." Second, Act 2 write-back is now possible
+for id-less elements — the thing that was blocking it. Replay already prints
+`locator degraded -> matched on <rank>`, so a step that has been falling back for weeks is
+a repair candidate BEFORE it ever fails. Feeding that rank to the healer is likely more
+valuable than the goal string.
+
 ## Act 2 — write-back (NEXT PHASE, not now)
 After a successful heal, write the corrected locator back into the recording so the
 NEXT run finds it deterministically and never calls the LLM again. This is what makes

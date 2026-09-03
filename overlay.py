@@ -67,8 +67,23 @@ def install_listener(page):
                 let id = el.id || '';
                 const P = 'oj-searchselect-filter-';
                 if (id.startsWith(P)) { id = id.slice(P.length); }
-                let name = el.getAttribute('aria-label') || el.getAttribute('title') ||
-                        el.getAttribute('placeholder') || '';
+
+                // Prefer the name perceive already computed and stamped.
+                // perceive.getName has 7 naming tiers (aria-labelledby, label[for],
+                // enclosing <label>, the Oracle |input->|hint trick, a proximity
+                // guess) to the 3 below. Recomputing here can produce a DIFFERENT
+                // string for the same element, and record/replay then disagree on
+                // anything with no id. Reading the stamp makes invariant #1
+                // structural rather than a rule someone has to remember.
+                let name = (el.getAttribute && el.getAttribute('data-ai-name')) || '';
+
+                // Fallback only for elements perceive never stamped — e.g. a
+                // search-select filter input that materialised after the last
+                // perceive and is now document.activeElement at seal time.
+                if (!name) {
+                    name = el.getAttribute('aria-label') || el.getAttribute('title') ||
+                           el.getAttribute('placeholder') || '';
+                }
                 if (!name) {
                     const img = el.querySelector('img');
                     if (img) name = img.getAttribute('alt') || img.getAttribute('title') || '';

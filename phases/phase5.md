@@ -360,3 +360,50 @@ harmless, so replay needs no "already editing" check.
 - A human-readable `label` field for the healer (Phase 6), separate from `name`.
 - Vertical row virtualization untested (5-row cards only so far).
 - `grid_probe.py` is the throwaway diagnostic; delete once nothing else needs it.
+
+### Grid horizontal scroll (added after the first pass)
+
+Replay scrolls on its own, but the RECORDER could not. Badges are `position: fixed`
+divs placed at draw time, so a mouse scroll desyncs every one of them — which is why
+the `scroll` commands exist at all: they run a loop iteration, re-perceive, and redraw.
+Added a `grid` target to `actions.scroll` (the only HORIZONTAL one, `scrollBy(amount, 0)`
+on `<grid>:databody`, negative = left) plus a **→ GRID** button in the command center,
+since overlay mode has no terminal to type into. Also compacted the command center into
+a scrollable canvas with one shared amount box — four separate entry boxes had pushed
+FINISH off the bottom of the window.
+
+
+
+## 5i — Naming parity + ranked locators
+
+### Naming parity (invariant #1, made structural)
+
+`perceive.getName` had grown to 7 naming tiers while `overlay.elementInfo` still had 3,
+so the two could compute DIFFERENT names for the same element — and record/replay then
+disagree on anything with no id. It never bit in practice because the extra tiers mostly
+fire on form inputs, which Oracle gives ids, and replay prefers id whenever present.
+Fixed by the same stamp trick the grid work introduced: perceive writes `data-ai-name`
+onto every element it stamps, and `elementInfo` READS it (falling back to its old three
+tiers only for elements perceive never saw, such as a search-select filter that appears
+after the last perceive). One implementation means the two cannot drift — invariant #1
+is now a property of the code rather than a rule to remember.
+
+### Ranked locators
+
+`resolve(elements, step)` in actions.py replaces the old if/elif and walks locators
+tight-to-loose: **grid** `{grid,row,column}` → **id** → **name+tag with exactly one
+candidate** → **name+tag first-of-several (a guess)**. It returns which rank matched, and
+replay prints `locator degraded -> matched on ...` whenever the tightest one did not win —
+so a locator drifting is visible BEFORE the run it breaks.
+
+This can only find more than before: a step resolving on rank 1 or 2 never reaches the
+lower ranks, so existing passing recordings take an identical path. The real gain is
+falling through — a step whose recorded id no longer exists (`ui-id-250` for a menu
+"Cancel" is in a real recording) used to fail outright even though its name would have
+found it. And rank 4 turns the two "Search" magnifiers from a silent wrong-element pick
+into a reported guess.
+
+`scope_id` (name+tag narrowed by a containing element's id) is deliberately NOT built: it
+needs a new recorded field, so wait until `GUESS` actually shows up in a run log rather
+than predicting where duplicates will appear. The `select` branch also gained the
+five-attempt retry loop it was missing, and now goes through `resolve` too.

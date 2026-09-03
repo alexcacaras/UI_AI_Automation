@@ -1,9 +1,8 @@
 import json
 import os
 from perceive import perceive
-from actions import (find_by_id, click, fill_by_name, find_by_name, scroll,
-                     select_option_forgiving, find_by_grid, scroll_grid_h,
-                     wait_for_lov_options)
+from actions import (click, fill_by_name, scroll, select_option_forgiving,
+                     resolve, scroll_grid_h, wait_for_lov_options)
 import shutil
 from report import build_doc
 from dotenv import load_dotenv
@@ -66,15 +65,11 @@ def replay(page, name):
 
         if action in ("click", "type"):
             el = None
+            rank = "no match"
             is_grid = bool(step.get("grid"))
             for attempt in range(5):
                 elements = perceive(page)
-                if is_grid:
-                    el = find_by_grid(elements, step["grid"], step["row"], step["column"])
-                elif step["id"]:
-                    el = find_by_id(elements, step["id"])
-                else:
-                    el = find_by_name(elements, step["name"], step["tag"])
+                el, rank = resolve(elements, step)
                 if el is not None:
                     break
                 print(f"'{step['name']}' not found yet, re-perceiving...")
@@ -87,6 +82,14 @@ def replay(page, name):
             if el is None:
                 print(f"couldn't find {step['name']} after retries, stopping")
                 return False
+
+            # Only report when the tightest locator did NOT win. A step that
+            # falls back still passes today, but it is drifting — this is the
+            # warning you get before it breaks (and what the Phase 6 healer
+            # will want to know about a step).
+            if rank not in ("grid", "id"):
+                print(f"   locator degraded -> matched on {rank} "
+                      f"(recorded id: {step.get('id') or '(none)'})")
 
             if action == "click":
                 click(page, el["index"])
@@ -130,10 +133,25 @@ def replay(page, name):
             scroll(page, step["target"], step["amount"])
 
         elif action == "select":
-            el = find_by_id(elements, step["id"])
+            # select used to resolve once against the warm-up perceive with no
+            # retries, while click/type got five — a slow render failed here
+            # where a click would have recovered. Now it matches, and goes
+            # through resolve() so it gets the ranked fallback too.
+            el = None
+            rank = "no match"
+            for attempt in range(5):
+                elements = perceive(page)
+                el, rank = resolve(elements, step)
+                if el is not None:
+                    break
+                print(f"select '{step['name']}' not found yet, re-perceiving...")
+                page.wait_for_timeout(2000)
+
             if el is None:
                 print(f"couldn't find select {step['name']}, stopping")
                 return False
+            if rank not in ("grid", "id"):
+                print(f"   locator degraded -> matched on {rank}")
             select_option_forgiving(page, el["index"], step["value"])
 
         if SCREENSHOTS:                                           

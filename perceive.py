@@ -128,8 +128,9 @@ def perceive(page):
             }
 
             document.querySelectorAll('[data-ai-index]').forEach(el => el.removeAttribute('data-ai-index'));
+            document.querySelectorAll('[data-ai-name]').forEach(el => el.removeAttribute('data-ai-name'));
             document.querySelectorAll('[data-ai-grid]').forEach(el => {
-                ['data-ai-grid', 'data-ai-row', 'data-ai-col', 'data-ai-name']
+                ['data-ai-grid', 'data-ai-row', 'data-ai-col']
                     .forEach(a => el.removeAttribute(a));
             });
 
@@ -173,6 +174,12 @@ def perceive(page):
 
                 n = n + 1;
                 el.setAttribute('data-ai-index', String(n));
+                // Stamp the name so overlay.elementInfo can READ it instead of
+                // recomputing. getName has 7 naming tiers to elementInfo's 3, so
+                // recomputing there can yield a DIFFERENT string for the same
+                // element — and record/replay then disagree on any id-less one.
+                // One implementation makes invariant #1 structural, not a rule.
+                el.setAttribute('data-ai-name', name);
 
                 const item = {
                     index: n,
@@ -193,7 +200,6 @@ def perceive(page):
                     el.setAttribute('data-ai-grid', g.grid);
                     el.setAttribute('data-ai-row', String(g.row));
                     el.setAttribute('data-ai-col', String(g.column));
-                    el.setAttribute('data-ai-name', item.name);
                 }
                 items.push(item);
             });
