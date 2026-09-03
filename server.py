@@ -5,6 +5,11 @@ import json
 import time
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# replay.py also calls load_dotenv(), but it's imported inside automation_thread()
+# — long after the state dict below is built. So load it here too.
+load_dotenv()
 
 app = Flask(
     __name__,
@@ -35,7 +40,7 @@ state = {
     "goal": "",
     "suite_tests": [],
 
-    "url": "",
+    "url": os.getenv("BASE_URL", ""),
 }
 
 

@@ -45,6 +45,25 @@ def install_listener(page):
 
             window.elementInfo = function(el) {
                 if (!el) return null;
+
+                // ORACLE DATA GRID (time card): perceive already worked out this
+                // cell's identity and stamped it on the element. Read that answer
+                // rather than recomputing — invariant #1, one implementation only.
+                // closest() matters: once a cell is in edit mode the focused thing
+                // is the search-select INPUT inside it, but what we record is the CELL.
+                const cellEl = el.closest ? el.closest('[data-ai-grid]') : null;
+                if (cellEl) {
+                    return {
+                        id: '',                                  // ui-id-N is a lie; see actions.identity
+                        name: cellEl.getAttribute('data-ai-name') || '',
+                        tag: cellEl.tagName.toLowerCase(),
+                        role: cellEl.getAttribute('role') || '',
+                        grid: cellEl.getAttribute('data-ai-grid'),
+                        row: parseInt(cellEl.getAttribute('data-ai-row'), 10),
+                        column: parseInt(cellEl.getAttribute('data-ai-col'), 10)
+                    };
+                }
+
                 let id = el.id || '';
                 const P = 'oj-searchselect-filter-';
                 if (id.startsWith(P)) { id = id.slice(P.length); }

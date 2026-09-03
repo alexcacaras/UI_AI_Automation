@@ -1,7 +1,9 @@
 import json
 import os
 from perceive import perceive
-from actions import find_by_id, click, fill_by_name, find_by_name, scroll,  select_option_forgiving
+from actions import (find_by_id, click, fill_by_name, find_by_name, scroll,
+                     select_option_forgiving, find_by_grid, scroll_grid_h,
+                     wait_for_lov_options)
 import shutil
 from report import build_doc
 from dotenv import load_dotenv
@@ -64,15 +66,22 @@ def replay(page, name):
 
         if action in ("click", "type"):
             el = None
+            is_grid = bool(step.get("grid"))
             for attempt in range(5):
                 elements = perceive(page)
-                if step["id"]:
+                if is_grid:
+                    el = find_by_grid(elements, step["grid"], step["row"], step["column"])
+                elif step["id"]:
                     el = find_by_id(elements, step["id"])
                 else:
                     el = find_by_name(elements, step["name"], step["tag"])
                 if el is not None:
                     break
                 print(f"'{step['name']}' not found yet, re-perceiving...")
+                if is_grid:
+                    # The grid is virtualized — an off-screen column isn't in the
+                    # DOM at all. Start from the far left, then walk right.
+                    scroll_grid_h(page, step["grid"], "reset" if attempt == 0 else 600)
                 page.wait_for_timeout(2000)
 
             if el is None:
@@ -82,10 +91,27 @@ def replay(page, name):
             if action == "click":
                 click(page, el["index"])
             else:  # type
-                page.locator(f'[data-ai-index="{el["index"]}"]').focus()
-                page.keyboard.type(step["value"])
+                loc = page.locator(f'[data-ai-index="{el["index"]}"]')
+                if is_grid:
+                    # A grid cell needs a trusted CLICK to reach edit mode; focus()
+                    # leaves it in 'navigation' and the keystrokes go nowhere.
+                    # And search-select cells query per keystroke — full-speed
+                    # typing strands them on a stale "No matches found".
+                    loc.click()
+                    page.wait_for_timeout(500)
+                    if step.get("mode") == "replace":
+                        loc.press("Control+A")
+                    page.keyboard.type(step["value"], delay=120)
+                else:
+                    loc.focus()
+                    if step.get("mode") == "replace":
+                        loc.press("Control+A")     # select-all so type() overwrites
+                    page.keyboard.type(step["value"])
                 if step["enter"]:
-                    page.wait_for_timeout(1000)
+                    if is_grid:
+                        wait_for_lov_options(page)   # never Enter into an empty list
+                    else:
+                        page.wait_for_timeout(1000)
                     page.keyboard.press("Enter")
 
         elif action == "fill":

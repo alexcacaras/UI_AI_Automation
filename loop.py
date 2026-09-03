@@ -11,6 +11,19 @@ import os
 #loop file
 
 
+def carry_grid(step, info):
+    """Copy Oracle data-grid identity from a browser-side elementInfo into a step.
+
+    Grid cells (time card) have no usable id — their identity is
+    {grid, row, column}. See actions.identity for the same logic on the
+    manual-mode side.
+    """
+    for key in ("grid", "row", "column"):
+        if info and info.get(key) is not None:
+            step[key] = info[key]
+    return step
+
+
 def run_loop(page, mode, name, goal, interactive=True):
      done = False
      history = []
@@ -45,7 +58,12 @@ def run_loop(page, mode, name, goal, interactive=True):
                 history[-1]["result"] = verdict
             if pending_step is not None:
                 if pending_step["action"] == "click":
-                    if verdict == "changed":
+                    # Grid cells bypass the gate. Clicking one only flips it to
+                    # edit mode — same id, same name, no new elements — so
+                    # did_change reports "no change" and the step gets dropped.
+                    # Same reasoning as invariant #7 for overlay clicks: a typed
+                    # "click 19" is deliberate, there is no intent to infer.
+                    if verdict == "changed" or "grid" in pending_step:
                         recording.append(pending_step)
                 elif pending_step["action"] == "press":
                     recording.append(pending_step)
@@ -110,6 +128,7 @@ def run_loop(page, mode, name, goal, interactive=True):
             elif click_info is not None:
                 step = {"action": "click", "id": click_info.get("id",""), "name": click_info.get("name",""),
                         "role": click_info.get("role",""), "tag": click_info.get("tag","")}
+                carry_grid(step, click_info)
                 recording.append(step)
                 cmd = "overlay_done"
             elif action is not None and action["kind"] == "seal":
@@ -117,8 +136,9 @@ def run_loop(page, mode, name, goal, interactive=True):
                 if action["value"] != "":
                     t = action["target"] or {}
                     step = {"action": "type", "id": t.get("id",""), "name": t.get("name",""),
-                            "role": "", "tag": t.get("tag",""),
+                            "role": t.get("role", ""), "tag": t.get("tag",""),
                             "value": action["value"], "mode": action["mode"], "enter": False}
+                    carry_grid(step, t)
                     recording.append(step)
                 cmd = "overlay_done"
             elif action is not None and action["kind"] == "press":

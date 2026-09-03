@@ -1,10 +1,17 @@
 # main.py
+import os
+from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 from loop import run_loop
 from replay import replay
 from overlay import click_queue
 from runs import build_order, run_suite
 from command_center import get_recording_info
+
+load_dotenv()
+BASE_URL = os.getenv("BASE_URL", "")
+if not BASE_URL:
+    raise SystemExit("BASE_URL not set — add it to .env (see .env.example)")
 
 def on_badge_click(info):
     click_queue.put(info)
@@ -13,7 +20,7 @@ with sync_playwright() as p:
     browser = p.chromium.launch(headless=False, args=["--start-maximized"])
     page = browser.new_page(no_viewport=True)
     page.expose_function("badgeClicked", on_badge_click)
-    page.goto("")
+    page.goto(BASE_URL)
     input("Log in manually in the browser, then press Enter here and choose the mode...")
 
     mode = input("(a)i / (m)anual / (o)verlay / (p)layback / (r)un: ").strip().lower()

@@ -60,23 +60,110 @@ def find_by_name(elements, target_name, target_tag):
             return el
     return None
 
+def find_by_grid(elements, grid, row, column):
+    """Resolve an Oracle data-grid cell by {grid, row, column}.
+
+    The tightest locator available for a grid cell — there is no durable id
+    (ui-id-N renumbers every session) and names collide across day columns.
+    perceive puts these three fields on every cell it stamps.
+    """
+    for el in elements:
+        if el.get("grid") == grid and el.get("row") == row and el.get("column") == column:
+            return el
+    return None
+
+def scroll_grid_h(page, grid, amount):
+    """Scroll a data grid's day columns sideways, or reset to the far left.
+
+    The grid is virtualized (scroll-policy="auto"): columns that are off-screen
+    do NOT exist in the DOM, and how many are rendered depends on window width.
+    So a missing column may just mean "not scrolled there yet".
+
+    Note getElementById, not querySelector — the id contains a colon
+    ("timecard-datagrid:databody"), which is a CSS selector operator.
+    """
+    return page.evaluate("""
+        ([grid, amount]) => {
+            const body = document.getElementById(grid + ':databody');
+            if (!body) return false;
+            if (amount === 'reset') { body.scrollLeft = 0; }
+            else { body.scrollBy(amount, 0); }
+            return true;
+        }
+    """, [grid, amount])
+
 #=============================================
 #---------------do helper actions-------------
 #=============================================
 
+def identity(el):
+    """The durable fields of a perceived element, for recording into a step.
+
+    Oracle JET data-grid cells (time card) have NO usable id: theirs is a
+    jQuery counter (ui-id-138) that renumbers every session. Their real
+    identity is {grid, row, column}, which perceive reads from the JET
+    component. We BLANK the id for those, because replay prefers id whenever
+    one is present — recording a known-bad id makes replay fail confidently
+    instead of falling through to the grid fields.
+    """
+    step = {"id": el["id"], "name": el["name"], "role": el["role"], "tag": el["tag"]}
+    if "grid" in el:
+        step["id"] = ""
+        step["grid"] = el["grid"]
+        step["row"] = el["row"]
+        step["column"] = el["column"]
+    return step
+
+
 def do_click(page, index, elements):
     click(page, index)
     el = search_element(elements, index)
-    pending_step = {"action": "click", "id": el["id"], "name": el["name"], "role": el["role"], "tag": el["tag"]}
+    pending_step = {"action": "click", **identity(el)}
     return pending_step
 
+def wait_for_lov_options(page, timeout=10000, step=400):
+    """Wait until an open Oracle search-select dropdown has options with REAL text.
+
+    A fixed sleep races the query: options can exist with EMPTY text while still
+    rendering, and Enter then commits nothing. Proven the hard way in grid_probe.
+    """
+    waited = 0
+    while waited < timeout:
+        ready = page.evaluate("""
+            () => [...document.querySelectorAll('.oj-listview-cell-element')]
+                    .some(o => o.getBoundingClientRect().height > 0 &&
+                               (o.innerText || '').trim() !== '')
+        """)
+        if ready:
+            return True
+        page.wait_for_timeout(step)
+        waited += step
+    return False
+
+
 def do_type_python(page, index, text, press_enter, elements):
-    page.locator(f'[data-ai-index="{index}"]').focus()
-    page.keyboard.type(text)
-    if press_enter:
-        page.keyboard.press("Enter")
     el = search_element(elements, index)
-    pending_step = {"action": "type", "id": el["id"], "name": el["name"], "role": el["role"], "tag": el["tag"], "value": text, "enter": press_enter}
+    loc = page.locator(f'[data-ai-index="{index}"]')
+    is_grid = bool(el) and "grid" in el
+
+    if is_grid:
+        # A data-grid cell needs a trusted CLICK to reach mode='edit'; focus()
+        # alone leaves it in 'navigation' and the keystrokes go nowhere.
+        # And a search-select cell fires an async query PER KEYSTROKE — typing at
+        # full speed leaves it stuck on a stale "No matches found", so pace it.
+        loc.click()
+        page.wait_for_timeout(500)
+        page.keyboard.type(text, delay=120)
+    else:
+        loc.focus()
+        page.keyboard.type(text)
+
+    if press_enter:
+        if is_grid:
+            wait_for_lov_options(page)     # don't press Enter into an empty list
+        page.keyboard.press("Enter")
+
+    pending_step = {"action": "type", **identity(el), "value": text, "enter": press_enter}
     return pending_step
 
 def do_type_live(page, index, elements):
@@ -96,7 +183,7 @@ def do_type_live(page, index, elements):
     text = page.evaluate("window.capturedText")
     page.evaluate("document.removeEventListener('keydown', window._captureHandler)")
     el = search_element(elements, index)
-    pending_step = {"action": "type", "id": el["id"], "name": el["name"], "role": el["role"], "tag": el["tag"], "value": text, "enter": False}
+    pending_step = {"action": "type", **identity(el), "value": text, "enter": False}
     return pending_step
 
 

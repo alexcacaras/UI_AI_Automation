@@ -3,7 +3,7 @@ import './App.css'
 
 function App() {
   const [url, setUrl] = useState(
-    ''
+    'https://login-etnu-test-saasfaprod1.fa.ocs.oraclecloud.com'
   )
 
   const [operation, setOperation] = useState('record')

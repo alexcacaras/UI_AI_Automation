@@ -164,14 +164,14 @@ Format: **YAML** (comments, readable, easy to copy per client). One file per
 client/environment.
 
 ```yaml
-client_id: "RCSD"
+client_id: "EXAMPLECO"
 environment: "TEST"
-base_url: "https://fa-euum-test-saasfaprod1.fa.ocs.oraclecloud.com"
+base_url: "https://<pod>.fa.<region>.oraclecloud.com"   # real value lives in .env
 login_type: "standard"          # standard | microsoft_sso | idcs
 
 credentials:
-  username_env: "RCSD_TEST_USERNAME"   # NAME of env var, not the value
-  password_env: "RCSD_TEST_PASSWORD"   # actual secret lives in .env
+  username_env: "EXAMPLECO_TEST_USERNAME"   # NAME of env var, not the value
+  password_env: "EXAMPLECO_TEST_PASSWORD"   # actual secret lives in .env
 
 login_settings:
   email_domain: "@pensionsbc.ca"       # SSO domain (was hardcoded in microsoft page object)

@@ -211,4 +211,152 @@ Dates — recording convention, NOT code:
   (dd/mm/yy is typeable), don't click the calendar. Deterministic + parameterizable (${date},
   Phase 8 later). Same spirit as Enter-to-search.
 
-Known limitations documented (defer): Time Card grid, new-tab popups, global-search replay.
+Known limitations documented (defer): Time Card grid (SOLVED — see 5h), new-tab popups,
+global-search replay.
+
+
+
+## 5h — Oracle JET data grid (Time Card) — perceive + record + replay
+
+DONE end to end: cells are perceived, recorded in BOTH overlay and manual modes, and
+replayed deterministically. Read this before touching any `<oj-data-grid>` page.
+
+### The symptom
+
+Perceive returned **17 elements** on a Time Card — global header and toolbar only.
+The whole grid (Assignment, Time Type, all 14 day columns) was invisible, so a teammate
+could record "click Save" on an empty card and nothing else.
+
+### Diagnosis — what it was NOT
+
+| hypothesis | verdict |
+|---|---|
+| iframe (`page.evaluate` is main-frame only) | NO — `iframeCount: 0` |
+| shadow DOM (`querySelectorAll` can't pierce) | NO — `shadowHosts: 0` |
+| `isVisible` too aggressive (287 matched → 18 visible) | NO — the 269 dropped were genuinely collapsed popup menus |
+| `ACTIONABLE` never matched the cells | **YES** |
+
+The 94% visibility drop looked damning and was a red herring. **Lesson: bucket filter
+rejects by REASON (display:none / visibility:hidden / zero-size) before concluding.**
+
+A grid cell is `<div role="application" class="oj-datagrid-cell">` — neither the role
+nor a bare div was in the selector.
+
+### Identity — nothing in the DOM is durable
+
+- `id="ui-id-138"` — jQuery UI's global counter. Renumbers every session.
+- `keys.column` — looks like a key, is literally `index * 3 + 2`. Zero extra information.
+- search-select id inside an editing cell — the `_r_<digits>` suffix is regenerated per
+  session (saw `_r_6120781411881509`, `_r_6635640910900337`, `_r_6979257603296843` for
+  the SAME cell on three runs).
+- No `aria-rowindex`, no `aria-colindex`, no `aria-describedby`. Nothing positional.
+
+**The answer is the JET component API:**
+
+```js
+dg.getContextByNode(cell)
+// { indexes: {row, column}, keys: {...}, data: {data}, mode: 'navigation'|'edit' }
+```
+
+Identity = `{grid: gridEl.id, row: indexes.row, column: indexes.column}`. The GRID's id
+(`timecard-datagrid`) is stable and semantic — only the per-cell ids are junk.
+
+`keys.row` is just the row index as a string, so no durable row identity exists. A time
+card row IS its position; recordings are order-sensitive by nature. `data.data` holds
+real Oracle surrogate keys (assignment `3000000086...`) — useful later for assertion
+steps, not for locating.
+
+### Column layout, and why it survives a period rollover
+
+```
+0        Assignment   (required)
+1        Time Type    (required)
+2 – 8    hidden additional-attribute columns (Project, Task, ...)
+9 – 22   the 14 days of the period, in order
+```
+
+Verified across two pay periods (08/30–09/12 and 09/13–09/26): the index→key map is
+**identical**, so column 9 is "day 1 of the period" in both. That is what makes a grid
+recording durable, and why we do NOT record the date. Hidden columns 2–8 still occupy
+index space, so un-hiding Project does not renumber the day columns.
+
+### Interaction — proven, using only existing primitives
+
+**Synthetic events do not work.** `element.click()` from the DevTools console leaves
+`mode: 'navigation'` and opens nothing; JET ignores untrusted events. Playwright's input
+IS trusted. Any future console probe of this grid will mislead you on interaction.
+
+```
+QUANTITY CELL   click cell -> type value -> Tab
+DROPDOWN CELL   click cell -> type text SLOWLY -> wait for options -> Enter
+REACH A COLUMN  <grid>:databody . scrollBy(amount, 0)      <- HORIZONTAL
+```
+
+In edit mode the CELL DIV holds focus and captures keys — there is **no `<input>` to wait
+for**. `mode === 'edit'` is the only reliable signal that editing began.
+
+**Typing speed is a real bug.** `keyboard.type("Regular")` at full speed → "No matches
+found", while `"Reg"` → "1 matches found". More of the right word, fewer matches. Cause
+was NOT lost keystrokes (a per-character trace showed the filter received `R`, `Re`,
+`Reg`... correctly) — the search-select fires an async query per keystroke, and typing
+faster than the round-trip strands it on a stale empty result. Fix: `delay=120` per key,
+and POLL for options to have real text (`wait_for_lov_options`). A fixed sleep races the
+dropdown: options can exist with empty text while still rendering.
+
+**Enter commits**, so dropdown options never need perceiving — they are
+`div[role="gridcell"]` inside `li[role="row"]` in a floating `lovDropdown` layer, none of
+which are in ACTIONABLE, and we never had to add them. Matches invariant #11
+(Enter-to-search) and `fill_by_name`'s type-then-Enter pattern.
+
+**Virtualization** (`scroll-policy="auto"`): only rendered cells exist in the DOM, and how
+many columns render depends on WINDOW WIDTH (one run had 0–18, a wider window 0–22). So
+replay cannot assume a column exists — on a miss it resets scroll to the far left, then
+walks right. Frozen columns (Assignment, Time Type) live in `<grid>:databodyFrozenCol`, a
+SEPARATE scroller from `<grid>:databody`. Use `getElementById` — the id contains a colon,
+which is a CSS selector operator.
+
+### What was built
+
+- **perceive.py** — `.oj-datagrid-cell` in ACTIONABLE; `gridInfo()` reads the JET context;
+  `headerFor()` maps column→header text (cached per grid per perceive). Cells short-circuit
+  BEFORE `getName`, both because a cell has no label of its own and because `getName`'s
+  tier-6 proximity fallback runs `querySelectorAll('label, span')` PER ELEMENT — ~100 cells
+  would mean ~100 full-document scans every perceive.
+  `gridInfo` is guarded by `classList.contains('oj-datagrid-cell')` so only the CELL gets
+  grid identity, never its descendants (else the search-select input that appears in edit
+  mode would also claim to be "row 1, Time Type").
+- **Naming** is `row 2, Quantity (col 9)`. The column index is ALWAYS included: time card
+  headers are multi-level (a date row above a "Quantity" row) and we only reach the inner
+  level, so all 14 day columns come back named "Quantity" and would collide. The date is
+  deliberately excluded — it drifts every period while row/column do not. A human-readable
+  label belongs in its own field later (Phase 6 healer), never in the matched name.
+- **perceive stamps its answer** on the element (`data-ai-grid` / `-row` / `-col` / `-name`)
+  and **overlay.elementInfo READS that stamp** rather than recomputing. This satisfies
+  invariant #1 by construction — one implementation, so perceive and overlay cannot drift.
+  `elementInfo` uses `closest('[data-ai-grid]')`: once a cell is editing, the focused thing
+  is the search-select INPUT inside it, but what we record is the CELL.
+- **actions.identity()** carries `{grid, row, column}` and **BLANKS the id**. Critical:
+  `replay.py` prefers id whenever present, so recording `ui-id-166` would make replay fail
+  confidently instead of falling through to the grid fields.
+- **loop.py** — `carry_grid()` on the overlay click and seal paths; manual grid clicks
+  BYPASS the `did_change` gate. Clicking a cell only flips it to edit mode — same id, same
+  name, no new elements — so the gate reports "no change" and would drop the step. Same
+  reasoning as invariant #7.
+- **replay.py** — `find_by_grid()` first when a step has `grid`; scroll-and-retry on a
+  miss; click-not-focus, `delay=120`, and `wait_for_lov_options()` before Enter.
+
+### Verified
+
+`test1` (overlay) and `test2` (manual) both record correct identity and both replay clean.
+Overlay records click + type as separate steps; manual records only a type (its own click
+is internal). **Both shapes replay fine** — clicking a cell that is already in edit mode is
+harmless, so replay needs no "already editing" check.
+
+### Parked
+
+- `data.data` surrogate keys → assertion/verification steps (Phase 8).
+- `${day}` / `${date}` variables over row/column (Phase 8) — "day 1" as an index is already
+  the variable-friendly shape.
+- A human-readable `label` field for the healer (Phase 6), separate from `name`.
+- Vertical row virtualization untested (5-row cards only so far).
+- `grid_probe.py` is the throwaway diagnostic; delete once nothing else needs it.

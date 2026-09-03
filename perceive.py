@@ -3,7 +3,7 @@
 def perceive(page):
         elements = page.evaluate("""
         () => {
-            const ACTIONABLE = 'a,button,input,select,textarea,[role="button"],[role="link"],[role="tab"],[role="textbox"],[role="combobox"],[role="menuitem"],[role="checkbox"],[role="option"],div[id*="groupNode"],div[id*="nvgpgl"],li.FndSearchSuggestLIItem';
+            const ACTIONABLE = 'a,button,input,select,textarea,[role="button"],[role="link"],[role="tab"],[role="textbox"],[role="combobox"],[role="menuitem"],[role="checkbox"],[role="option"],div[id*="groupNode"],div[id*="nvgpgl"],li.FndSearchSuggestLIItem,.oj-datagrid-cell';
 
             function isVisible(el) {
                 const s = getComputedStyle(el);
@@ -87,34 +87,115 @@ def perceive(page):
                 return el === top || el.contains(top) || top.contains(el);
             }
 
+            // ---- ORACLE JET DATA GRID (time card etc.) ----------------------
+            // Grid cells carry NO durable id: their ids are a jQuery counter
+            // (ui-id-138) that renumbers every session. The only real identity
+            // is {grid, row, column}, which the JET component hands us.
+            // Only the cell ITSELF gets grid identity — descendants (the
+            // search-select input that appears in edit mode) keep normal naming.
+            function gridInfo(el) {
+                if (!el.classList.contains('oj-datagrid-cell')) return null;
+                const gridEl = el.closest('oj-data-grid');
+                if (!gridEl || !gridEl.getContextByNode) return null;
+                try {
+                    const ctx = gridEl.getContextByNode(el);
+                    if (!ctx || !ctx.indexes) return null;
+                    return { gridEl: gridEl, grid: gridEl.id || '',
+                             row: ctx.indexes.row, column: ctx.indexes.column };
+                } catch (e) { return null; }
+            }
+
+            // column index -> header text, built at most once per grid per perceive
+            const hdrCache = {};
+            function headerFor(gridEl, column) {
+                const key = gridEl.id || 'grid';
+                if (!hdrCache[key]) {
+                    const map = {};
+                    gridEl.querySelectorAll('.oj-datagrid-column-header-cell').forEach(h => {
+                        try {
+                            const c = gridEl.getContextByNode(h);
+                            if (!c) return;
+                            const idx = (c.index !== undefined) ? c.index
+                                      : (c.indexes ? c.indexes.column : undefined);
+                            if (idx === undefined) return;
+                            const t = (h.innerText || '').trim().replace(/\\s+/g, ' ');
+                            if (t) map[idx] = t.slice(0, 40);
+                        } catch (e) {}
+                    });
+                    hdrCache[key] = map;
+                }
+                return hdrCache[key][column] || '';
+            }
+
             document.querySelectorAll('[data-ai-index]').forEach(el => el.removeAttribute('data-ai-index'));
+            document.querySelectorAll('[data-ai-grid]').forEach(el => {
+                ['data-ai-grid', 'data-ai-row', 'data-ai-col', 'data-ai-name']
+                    .forEach(a => el.removeAttribute(a));
+            });
 
             const items = [];
             let n = 0;
             document.querySelectorAll(ACTIONABLE).forEach(el => {
                 if (!isVisible(el)) return;
-                if (!isClickable(el)) return; 
-                let name = getName(el);
-                if (!name) {
-                    const tag = el.tagName.toLowerCase();
-                    const role = el.getAttribute('role') || '';
-                    if (tag === 'input' || tag === 'textarea' || role === 'textbox' || role === 'combobox') {
-                        name = 'text field';
-                    } else {
-                        return;
+                if (!isClickable(el)) return;
+
+                // Grid cells short-circuit BEFORE getName. Two reasons:
+                // 1. a cell has no label of its own — its meaning is its position
+                // 2. getName's proximity fallback scans the whole document per
+                //    element; ~100 cells would make that scan run ~100x a perceive
+                const g = gridInfo(el);
+                let name;
+                if (g) {
+                    // The column index is ALWAYS included. Time card headers are
+                    // multi-level (a date row above a "Quantity" row) and we only
+                    // reach the inner level — so all 14 day columns come back named
+                    // "Quantity". Without the index, 14 cells per row share a name
+                    // and find_by_name picks whichever comes first.
+                    // The date is deliberately NOT used: it drifts every pay period,
+                    // while row/column do not. A human-readable label belongs in its
+                    // own field later (Phase 6 healer), never in the matched name.
+                    const hdr = headerFor(g.gridEl, g.column);
+                    const base = 'row ' + (g.row + 1) + ', ';
+                    name = hdr ? (base + hdr + ' (col ' + g.column + ')')
+                               : (base + 'col ' + g.column);
+                } else {
+                    name = getName(el);
+                    if (!name) {
+                        const tag = el.tagName.toLowerCase();
+                        const role = el.getAttribute('role') || '';
+                        if (tag === 'input' || tag === 'textarea' || role === 'textbox' || role === 'combobox') {
+                            name = 'text field';
+                        } else {
+                            return;
+                        }
                     }
                 }
 
                 n = n + 1;
                 el.setAttribute('data-ai-index', String(n));
 
-                items.push({
+                const item = {
                     index: n,
                     tag: el.tagName.toLowerCase(),
                     role: el.getAttribute('role') || '',
                     name: name.slice(0, 100),
                     id: el.id || ''
-                });
+                };
+                if (g) {
+                    // durable identity for a cell — replay resolves on these,
+                    // never on the throwaway ui-id
+                    item.grid = g.grid;
+                    item.row = g.row;
+                    item.column = g.column;
+                    // Stamp it on the element too, so overlay.elementInfo can READ
+                    // this answer instead of recomputing it. Invariant #1: one
+                    // implementation means perceive and overlay cannot drift apart.
+                    el.setAttribute('data-ai-grid', g.grid);
+                    el.setAttribute('data-ai-row', String(g.row));
+                    el.setAttribute('data-ai-col', String(g.column));
+                    el.setAttribute('data-ai-name', item.name);
+                }
+                items.push(item);
             });
             return items;
         }
