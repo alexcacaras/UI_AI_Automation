@@ -26,7 +26,7 @@ Recordings are now {name, goal, steps} (was: bare array).
 - replay.py: reads .steps, extracts goal (isinstance check tolerates old bare arrays).
 - The `goal` variable is in scope at the return-False point, ready to feed the healer.
 
-## Act 1 — recover the run (THIS PHASE)
+## Act 1 — recover the run (DONE — see TIER 1 BUILT AND PROVEN, below)
 A heal_step function that, given the failed step + current elements + the goal,
 picks which current element is the lost one, so replay can act on it and continue.
 
@@ -53,6 +53,116 @@ Design decisions (locked):
 - Return the whole element dict on success (replay works in el["index"]; and Act 2
   write-back will need the full id/name/tag).
 
+## TIER 1 — BUILT AND PROVEN (2026-09-03)
+
+Healing works end to end on real Oracle pages, for both click and type steps.
+
+What exists:
+- `llm.py` — `heal_step(step, elements, goal, rank, steps, step_index)`. Returns
+  `(element_dict_or_None, reason)`. Behind it: `_complete` (provider shim),
+  `_complete_ollama`, `_extract_json`. `ask_llm` untouched.
+- `replay.py` — hook at the `el is None` point in the click/type branch, AFTER the
+  five deterministic retries. A step that resolves never touches the LLM.
+- `corrupt_step.py` — the test harness. Breaks one step of a recording on purpose.
+- `test_heal.py` — offline prompt harness, fake elements, no browser. Seconds per
+  iteration. Note its limit: ~600 tokens of fake page, so it CANNOT reproduce any
+  problem that only appears on a real, large page (see the num_ctx trap below).
+- `.env` — `HEALER`, `HEALER_PROVIDER`, `HEALER_MODEL`, `HEALER_NUM_CTX`,
+  `HEALER_TEMPERATURE`, `HEALER_MAX_CONSECUTIVE`. Documented in `.env.example`.
+
+Proven on:
+- `test` step 12 (`My Client Groups` -> corrupted to `Client Groups`, id blanked):
+  healed, and steps 13-14 then resolved with NO healing — which is the real proof.
+  A wrong pick would have put the run in a different Navigator module where
+  `Time Management` does not exist.
+- `typetest` step 7 (a `type` into `Name` -> corrupted to `Person Name`, id blanked,
+  on a page that also has a `Person Number` field): healed to the right input, and
+  the search returned the expected rows. Same self-validating shape.
+
+### The harness is the important part
+Breaking a step on demand makes healing testable in minutes instead of waiting for
+Oracle to change. TWO THINGS MUST BE BROKEN, not one:
+- Ranked locators (`actions.resolve`) walk grid -> id -> name+tag. Blanking ONLY the
+  id now falls through to name+tag and PASSES. The healer never fires and the test
+  proves nothing. So blank the id AND staleness the name (and grid/row/col for a cell).
+- Reword the name plausibly ("Name" -> "Person Name"), never to gibberish. Gibberish
+  gives the model nothing to match on, so -1 is the CORRECT answer and you learn
+  nothing about healing.
+- Break a step that LATER steps depend on. Then the recording validates the heal for
+  you and you never have to trust the model's stated reason. Breaking the last step
+  of a recording tests nothing: a wrong pick still reports PASS.
+
+## HARD-WON LESSONS (cost most of a session — read before blaming a model)
+
+**1. Ollama's `num_ctx` silently truncates. This is the big one.**
+`ollama show gemma4:e4b` advertises 131072 context. That is what the MODEL can do.
+Ollama allocates only `num_ctx` per request and its own default is small (2048 on
+this setup). A Navigator page perceives to ~2800 prompt tokens, so the prompt was
+being CUT with no error and no warning. The model then answered confidently from a
+page it had only half received — it picked "Sales" for "Client Groups" and reasoned
+about the SHAPE of divs, because shape was all that survived truncation.
+
+The failure looks exactly like a weak model. It is not. Set `num_ctx` explicitly,
+and print `prompt_eval_count` from the response — that number is the ground truth
+for what the model actually ingested, and `_complete_ollama` now warns when it hits
+the ceiling. Before swapping models, always check that line first.
+
+**2. Temperature was NOT the cause — and the wrong conclusion was nearly recorded.**
+gemma's default `temperature` is 1, which looked like an obvious culprit for erratic
+picks. It was tested directly (set back to 1, everything else unchanged): it healed
+correctly twice. Keep temperature 0 anyway — healing is a lookup, not composition,
+and a regression tool must give the same answer twice — but it is NOT the fix.
+
+Both of these were only distinguishable by changing ONE thing and re-running. The
+first diagnosis, the correction to it, and the correction to THAT were all cheap only
+because `corrupt_step.py` made the failure repeatable.
+
+**3. An 8B local model is enough for this task.** gemma4:e4b heals correctly once it
+can see the whole element list. The instinct to reach for `qwen3:14b` / `phi4:14b`
+was premature and would have "fixed" it for the wrong reason, leaving a slower model
+in place forever. Order to reach for things: prompt rules -> few-shot examples ->
+bigger model -> more perceive detail. The last one is the real ceiling: if two
+elements perceive identically, NO model can tell them apart — that is an information
+problem, not an intelligence problem.
+
+**4. Cascading heals are the dangerous failure, not a single wrong heal.**
+Observed: step 12 healed wrong -> step 13 healed wrong ON TOP of it -> the run walked
+deeper into the wrong module, each heal individually plausible, the sequence nonsense.
+`replay.py` now caps CONSECUTIVE heals (`HEALER_MAX_CONSECUTIVE`, default 3) and
+stands the healer down past that. Consecutive, not total: two heals far apart are two
+unrelated Oracle changes, both legitimately repaired; two back to back mean the second
+is judging a page the first one navigated to.
+
+**5. A green run that needed healing is not a green run.** replay now says so at the
+end. Without it, drift is invisible until the day it stops healing.
+
+**6. Recording goals matter now.** `test.json` has `goal: "test"`, which is worth
+nothing to the healer. `typetest.json` has a real one, and that is the difference
+between the model knowing it is searching for a person and guessing from labels.
+Tell teammates: the goal is not a label, it is context the repair path reads.
+
+### Unproven, kept anyway
+The recorded-path context (all steps, with the failing one marked, plus "the steps
+after this must stay reachable") is built and costs ~270 tokens. It has NOT been shown
+to change an outcome — both proven heals were winnable on the label alone, so every
+prompt variant passes them. Keep it (rare call, cheap, can only help on hard cases)
+but do not claim it works until a heal with several equally-plausible candidates
+turns on it.
+
+### Not done in Tier 1
+- `select` steps cannot heal — only the click/type branch is hooked.
+- The `is_grid` fix IS written (replay recomputes `is_grid` from the RESOLVED element,
+  because a healed grid cell whose step no longer carries grid identity would take the
+  `focus()` path, stay in navigation mode and swallow every keystroke silently) but is
+  UNTESTED. `test1.json` is the recording that would exercise it.
+- No write-back. That is Tier 2.
+
+### New known issue found while testing
+Replay verifies that an element was FOUND, never that the action DID anything. A
+`typetest` run ended inside an open Oracle cascading menu, having navigated nowhere,
+and printed `run passed`. Same family as the checkbox no-op bug. Locator resolution
+is not interaction success.
+
 ## STATUS UPDATE — the Act 2 blocker is gone
 
 Ranked locators are BUILT (phase5.md 5i). `actions.resolve(elements, step)` walks
@@ -77,6 +187,11 @@ the recording LEARN. Deferred deliberately:
   re-ranking over time. That's a real chunk of design; keep it out of Act 1.
 
 ## Parked / future (recorded so ideas aren't lost)
+- Tier 3 vision — the privacy question now has a concrete example rather than a
+  worry. A `typetest` run ended on a Person Management results page showing two
+  employees' names, person numbers and national IDs. The ELEMENT LIST from that page
+  is labels and ids; a SCREENSHOT of it is a payroll record. That is the argument for
+  vision staying local even if the text tier one day does not.
 - Retry-with-feedback: if a heal picks wrong, the NEXT step fails. Idea: re-heal the
   original step in place, telling the LLM "you picked X, the next action failed, choose
   differently." Do NOT rewind to step 1 (expensive; re-runs side effects like created

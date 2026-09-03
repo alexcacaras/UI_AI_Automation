@@ -2,3 +2,6 @@
 __pycache__/
 *.pyc
 .env
+# Recordings hold real employee data (names, person numbers, assignment ids).
+# Deliberately NOT committed until that is decided — see CLAUDE.md known items.
+recordings/

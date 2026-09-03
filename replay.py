@@ -5,9 +5,17 @@ from actions import (click, fill_by_name, scroll, select_option_forgiving,
                      resolve, scroll_grid_h, wait_for_lov_options)
 import shutil
 from report import build_doc
+from llm import heal_step
 from dotenv import load_dotenv
 load_dotenv()
 SCREENSHOTS = os.getenv("SCREENSHOTS", "off").lower() == "on"
+HEALER = os.getenv("HEALER", "on").lower() == "on"
+# CONSECUTIVE heals, not total. Two heals far apart in a run are two unrelated
+# Oracle changes, both legitimately repaired. Heals BACK TO BACK are different:
+# each one runs on a page the previous heal navigated to, so once one is wrong
+# the rest are guaranteed garbage and the run walks further off course while
+# still reporting progress. After this many in a row, stop trusting the healer.
+MAX_CONSECUTIVE_HEALS = int(os.getenv("HEALER_MAX_CONSECUTIVE", "3"))
 
 def replay(page, name):
     path = f"recordings/{name}.json"
@@ -40,7 +48,10 @@ def replay(page, name):
         if os.path.exists(shot_dir):
             shutil.rmtree(shot_dir)                   # clear old shots (handles fewer-steps case)
         os.makedirs(shot_dir, exist_ok=True)
-    for step in recording:
+    consecutive_heals = 0        # reset by any step that resolves on its own
+    total_heals = 0              # reported at the end of the run
+
+    for step_index, step in enumerate(recording):
         page.wait_for_load_state("domcontentloaded")
         try:
             page.wait_for_load_state("networkidle", timeout=13000)
@@ -79,9 +90,45 @@ def replay(page, name):
                     scroll_grid_h(page, step["grid"], "reset" if attempt == 0 else 600)
                 page.wait_for_timeout(2000)
 
+            healed = False
+            if el is None and HEALER:
+                # PHASE 6 TIER 1. The deterministic finder has exhausted its five
+                # retries, so this run is already dead — the healer costs nothing
+                # a passing step would have paid. It does NOT try harder to find
+                # by id/name; it asks which element on screen NOW is the lost one.
+                # `elements` is the last perceive from the retry loop above.
+                if consecutive_heals >= MAX_CONSECUTIVE_HEALS:
+                    print(f"   healer stood down: {consecutive_heals} heals in a row "
+                          f"already — this run has probably lost its place")
+                else:
+                    print(f"couldn't find {step['name']} — asking the healer...")
+                    el, reason = heal_step(step, elements, goal, rank,
+                                           steps=recording, step_index=step_index)
+                    if el is None:
+                        print(f"   healer gave up: {reason}")
+                    else:
+                        healed = True
+                        consecutive_heals += 1
+                        total_heals += 1
+                        print(f'   HEALED -> {el["index"]}: <{el["tag"]}> "{el["name"]}" '
+                              f'id={el.get("id") or "(none)"}')
+                        print(f"   reason: {reason}")
+
+            if not healed:
+                # A step that resolved on its own means we are demonstrably still
+                # on the right page, so the cascade worry is over.
+                consecutive_heals = 0
+
             if el is None:
                 print(f"couldn't find {step['name']} after retries, stopping")
                 return False
+
+            # is_grid was read off the STEP, before resolving. Trust the element
+            # we actually landed on instead: a healed cell can be a grid cell
+            # whose step no longer says so. It decides click-vs-focus, and a
+            # grid cell reached by focus() stays in 'navigation' mode and eats
+            # every keystroke without erroring (invariant #13) — a silent pass.
+            is_grid = bool(el.get("grid"))
 
             # Only report when the tightest locator did NOT win. A step that
             # falls back still passes today, but it is drifting — this is the
@@ -162,6 +209,11 @@ def replay(page, name):
 
         page.wait_for_timeout(3000)
 
-    if SCREENSHOTS and shots:                                   
+    if SCREENSHOTS and shots:
         build_doc(name, shots)
+    if total_heals:
+        # A green run that needed healing is not the same as a green run that
+        # didn't. Say so, or the drift is invisible until it stops healing.
+        print(f"run passed, but {total_heals} step(s) needed the healer — those "
+              f"locators are stale (Tier 2 will write the repairs back)")
     return True
