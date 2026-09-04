@@ -403,6 +403,20 @@ falling through — a step whose recorded id no longer exists (`ui-id-250` for a
 found it. And rank 4 turns the two "Search" magnifiers from a silent wrong-element pick
 into a reported guess.
 
+### grid-position — a rank added during Phase 6 (2026-09-04)
+
+`find_by_grid` matches grid AND row AND column, so renaming the grid ELEMENT loses a cell
+whose position never moved. That was a gap here, not in Phase 6. `resolve` now tries
+**grid-position** `{row, column}` as rank 2, right after `grid`, falling through if more
+than one grid on the page shares the position (then it is not identity any more).
+
+Found by handing that exact failure to the Phase 6 healer, three times. With `row=0 col=9`
+sitting in the prompt it answered `row 2, col 22`, then `row 5, col 10`, each with a fluent
+justification it invented after choosing. Exact numeric lookup across ~250 near-identical
+lines is dictionary work, not language work. The lesson generalises: before improving how
+the healer answers, ask whether the question should reach it at all — anything with an
+exact machine-checkable answer belongs in `resolve()`.
+
 `scope_id` (name+tag narrowed by a containing element's id) is deliberately NOT built: it
 needs a new recorded field, so wait until `GUESS` actually shows up in a run log rather
 than predicting where duplicates will appear. The `select` branch also gained the

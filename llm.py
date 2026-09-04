@@ -115,16 +115,25 @@ def heal_step(step, elements, goal, rank="no match", steps=None, step_index=None
       element None  -> no plausible match; the run should still stop. This is
                        the give-up path that Tier 3 (vision) will hang off.
     """
+    # The index MUST be unmistakable. An earlier format put a bare number at the
+    # front and an Oracle id at the back — "76: <div> ... id=ui-id-230" — and the
+    # model answered 230 every single time. It was not hallucinating; it was
+    # reading the digits out of the id, because nothing said which number was
+    # which. Label the index.
+    #
+    # And a grid cell's id is never sent: ui-id-N is a jQuery counter that
+    # renumbers every session (invariant #12), so it is not identity, it is
+    # noise shaped like identity — and it was the exact noise being misread.
     element_text = ""
     for el in elements:
-        line = f"{el['index']}: <{el['tag']}>"
+        line = f"index={el['index']}  <{el['tag']}>"
         if el.get("role"):
             line += f" role={el['role']}"
-        line += f' "{el["name"]}"'
-        if el.get("id"):
-            line += f" id={el['id']}"
+        line += f'  "{el["name"]}"'
         if el.get("grid"):
-            line += f" [grid cell row={el.get('row')} col={el.get('column')}]"
+            line += f"  [grid cell row={el.get('row')} col={el.get('column')}]"
+        elif el.get("id"):
+            line += f'  id="{el["id"]}"'
         element_text += line + "\n"
 
     # Describe the lost element from the durable fields the recording kept.
@@ -174,8 +183,13 @@ How the locator was last matching before it broke: {rank}
 
 WHAT THE TEST AS A WHOLE IS TRYING TO DO: {goal or "(not recorded)"}
 {path_text}
-ELEMENTS CURRENTLY ON THE PAGE:
+ELEMENTS CURRENTLY ON THE PAGE — there are {len(elements)}. Each line starts with
+`index=N`. That N is the ONLY number you may answer with. Other numbers appear in
+these lines (inside ids, names and column labels) and NONE of them are indexes:
 {element_text}
+Your answer must be a number that appears after `index=` above, or -1. An index
+that is not in that list is treated as a failure to answer.
+
 RULES:
 - This is an IDENTITY question, not a ranking question. You are not choosing the
   best available element. You are deciding whether the lost element is on this
@@ -201,30 +215,71 @@ RULES:
 Answer with JSON only, in exactly this shape:
 {{"index": <the index number of your pick, or -1>, "reason": "<one short sentence>"}}"""
 
-    try:
-        raw = _complete(prompt, json_mode=True)
-    except Exception as e:
-        return None, f"healer call failed: {e}"
+    # RETRY WITH FEEDBACK. An index that is not in the list is the model getting
+    # it wrong, and showing a model its own mistake is what lets it self-correct
+    # — so re-ask, carrying three things together: the element list (still in
+    # `prompt`, so the correction stays grounded in the real page), what it
+    # previously answered, and exactly why that was rejected. Drop the element
+    # list on the retry and it can only invent an index that looks legal, which
+    # is fabrication wearing a retry's clothing.
+    #
+    # What is NOT retried: -1. That is a legitimate answer, and re-asking after a
+    # correct give-up is pressure to fabricate a match that does not exist.
+    by_index = {el["index"]: el for el in elements}
+    valid = sorted(by_index)
+    max_attempts = int(os.getenv("HEALER_MAX_ATTEMPTS", "2"))
+    feedback = ""
+    last = "healer made no usable answer"
 
-    answer = _extract_json(raw)
-    if answer is None:
-        return None, f"could not parse model reply: {raw[:200]}"
+    for attempt in range(max_attempts):
+        try:
+            raw = _complete(prompt + feedback, json_mode=True)
+        except Exception as e:
+            return None, f"healer call failed: {e}"
 
-    reason = str(answer.get("reason", ""))
-    try:
-        index = int(answer.get("index", -1))
-    except (TypeError, ValueError):
-        return None, f"model returned a non-numeric index: {answer.get('index')!r}"
+        answer = _extract_json(raw)
+        if answer is None:
+            last = f"could not parse model reply: {raw[:200]}"
+            feedback = (
+                "\n\nYOUR PREVIOUS ANSWER WAS REJECTED: it was not valid JSON.\n"
+                'Answer with JSON only: {"index": <number>, "reason": "<sentence>"}'
+            )
+            continue
 
-    if index == -1:
-        return None, reason or "model found no plausible match"
+        reason = str(answer.get("reason", ""))
+        try:
+            index = int(answer.get("index", -1))
+        except (TypeError, ValueError):
+            last = f"model returned a non-numeric index: {answer.get('index')!r}"
+            feedback = (
+                f"\n\nYOUR PREVIOUS ANSWER WAS REJECTED: index "
+                f"{answer.get('index')!r} is not a number. Answer with an integer."
+            )
+            continue
 
-    # The model may hallucinate an index that was never in the list. Look it up
-    # rather than trusting it — an out-of-range pick is a give-up, not a crash.
-    for el in elements:
-        if el["index"] == index:
-            return el, reason
-    return None, f"model picked index {index}, which is not on the page"
+        if index == -1:
+            return None, reason or "model found no plausible match"
+
+        if index in by_index:
+            if attempt:
+                print(f"   [healer] recovered on attempt {attempt + 1}")
+            return by_index[index], reason
+
+        last = f"model picked index {index}, which is not on the page"
+        print(f"   [healer] rejected index {index} (not on the page), re-asking")
+        feedback = (
+            f"\n\nYOUR PREVIOUS ANSWER WAS REJECTED.\n"
+            f'You answered: {{"index": {index}, "reason": "{reason[:120]}"}}\n'
+            f"There is no element {index} on this page. You did not read the index "
+            f"off the list — you produced a number. The valid index numbers are the "
+            f"ones printed at the start of each line in the element list above; they "
+            f"run from {valid[0]} to {valid[-1]} and there are {len(valid)} of them.\n"
+            f"Answer again. Choose an index that literally appears in that list, or "
+            f"answer -1 if the element genuinely is not there. Do not answer {index} "
+            f"again, and do not invent another number."
+        )
+
+    return None, last
 
 
 def ask_llm(elements, goal, recent_history):

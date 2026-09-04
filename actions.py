@@ -72,6 +72,30 @@ def find_by_grid(elements, grid, row, column):
             return el
     return None
 
+def find_by_position(elements, row, column):
+    """Resolve a grid cell by {row, column} alone, when the GRID's id changed.
+
+    find_by_grid matches grid AND row AND column, so renaming the grid element
+    loses a cell whose position is still perfectly intact. The position is the
+    identity (invariant #12) — the grid's own id is just where it lives.
+
+    Returns (element_or_None, match_count). More than one match means several
+    grids on the page share the position, which is not identity any more, so
+    the caller falls through rather than guessing.
+
+    This exists because the Phase 6 healer was asked to do it and could not.
+    Handed a step with row=0 col=9 and ~250 elements, gemma answered
+    "row 2, col 22" and wrote a confident rationalisation for it. That is an
+    exact numeric lookup across near-identical lines — dictionary work, not
+    language work. Doing it here also keeps it off the LLM path entirely.
+    """
+    if row is None or column is None:
+        return None, 0
+    matches = [e for e in elements
+               if e.get("grid") and e.get("row") == row and e.get("column") == column]
+    return (matches[0] if len(matches) == 1 else None), len(matches)
+
+
 def resolve(elements, step):
     """Find the element a recorded step means, trying locators TIGHT to LOOSE.
 
@@ -79,10 +103,11 @@ def resolve(elements, step):
     that, so a locator degrading from 'id' to 'name+tag' is visible BEFORE the
     day it fails outright.
 
-        1  grid      {grid, row, column}   unique by construction
-        2  id        exact id
-        3  name+tag  EXACTLY ONE candidate
-        4  name+tag  first of several — a guess, logged loudly
+        1  grid           {grid, row, column}   unique by construction
+        2  grid-position  {row, column}         grid renamed, cell didn't move
+        3  id             exact id
+        4  name+tag       EXACTLY ONE candidate
+        5  name+tag       first of several — a guess, logged loudly
 
     Falling through is the whole point: today a step with an id that no longer
     exists (ui-id-N renumbers every session) fails outright, even when its name
@@ -98,6 +123,15 @@ def resolve(elements, step):
         el = find_by_grid(elements, step["grid"], step.get("row"), step.get("column"))
         if el is not None:
             return el, "grid"
+
+        # The grid element was renamed but the cell's position is unchanged.
+        # Deterministic, so it belongs here and not in the healer.
+        el, count = find_by_position(elements, step.get("row"), step.get("column"))
+        if el is not None:
+            return el, "grid-position"
+        if count > 1:
+            print(f"   {count} grids share row={step.get('row')} "
+                  f"col={step.get('column')} — position is not unique here")
 
     if step.get("id"):
         el = find_by_id(elements, step["id"])

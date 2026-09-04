@@ -83,6 +83,11 @@ def main():
     ap.add_argument("step", nargs="?", type=int, help="1-based step number")
     ap.add_argument("--name", help="the stale label to use instead of the real one")
     ap.add_argument("--out", help="output recording name (default <recording>_broken)")
+    ap.add_argument("--blank-position", action="store_true",
+                    help="grid cells: wipe row/column too, not just the grid id. "
+                         "This is the WORST case, not the realistic one — a cell's "
+                         "identity IS its position, so wiping it leaves nothing to "
+                         "heal from and no model can recover it.")
     args = ap.parse_args()
 
     envelope, steps = load(args.recording)
@@ -113,13 +118,25 @@ def main():
     print(f'  name  "{step.get("name")}"  ->  "{broken_name}"')
     if step.get("id"):
         print(f'  id    {step["id"]}  ->  (blank)')
-    if step.get("grid"):
-        print(f'  grid  {step["grid"]} row={step.get("row")} col={step.get("column")}  ->  (blank)')
-
     step["name"] = broken_name
     step["id"] = ""
-    for key in ("grid", "row", "column"):
-        step.pop(key, None)
+
+    if step.get("grid"):
+        # How a grid step ACTUALLY breaks: Oracle renames the grid element, so
+        # find_by_grid (which matches grid AND row AND column) misses — but the
+        # step still carries row/column, and heal_step puts them in the prompt.
+        # That is a healable failure. Wiping row/column instead deletes the only
+        # identity a cell has; the day columns then differ by nothing the model
+        # can see, and a wrong pick is guaranteed rather than unlucky.
+        if args.blank_position:
+            print(f'  grid  {step["grid"]} row={step.get("row")} '
+                  f'col={step.get("column")}  ->  (all blank — worst case)')
+            for key in ("grid", "row", "column"):
+                step.pop(key, None)
+        else:
+            print(f'  grid  {step["grid"]}  ->  "{step["grid"]}_renamed"  '
+                  f'(row/column kept — this is the realistic break)')
+            step["grid"] = f'{step["grid"]}_renamed'
 
     out_name = args.out or f"{args.recording}_broken"
     if out_name == args.recording:

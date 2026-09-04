@@ -125,7 +125,47 @@ bigger model -> more perceive detail. The last one is the real ceiling: if two
 elements perceive identically, NO model can tell them apart — that is an information
 problem, not an intelligence problem.
 
-**4. Cascading heals are the dangerous failure, not a single wrong heal.**
+**4. "Hallucinated index 230" was NOT hallucination — it was my prompt format.**
+The healer kept answering index 230, identically every run. The element lines read:
+
+    76: <div> "row 5, Quantity (col 10)" id=ui-id-230
+
+A bare number at the front, another at the back, nothing saying which was which.
+It was reading the digits out of the id. Fixed by labelling the field (`index=76`)
+and by NEVER sending a grid cell's id at all — `ui-id-N` is a jQuery counter that
+renumbers every session (invariant #12), so it was meaningless noise shaped exactly
+like an answer. A stable, repeatable wrong answer is evidence of a systematic cause;
+random wrongness is the model. 230 every single time was the tell, and it was missed
+for two runs by calling it hallucination.
+
+**4b. Retry-with-feedback is worth having, and -1 must never be retried.**
+`heal_step` now re-asks on an invalid or unparseable answer, carrying the element
+list (so the correction stays grounded in the real page), what it previously
+answered, and why that was rejected. `HEALER_MAX_ATTEMPTS`, default 2. A `-1` is
+never retried: it is a legitimate answer, and re-asking after a correct give-up is
+pressure to fabricate a match that does not exist.
+
+**4c. EXACT NUMERIC LOOKUP IS NOT A LANGUAGE-MODEL TASK. Read this one twice.**
+A time-card cell was corrupted realistically (grid element renamed, `row=0 col=9`
+intact and IN the prompt). The correct answer was an exact match on two integers.
+gemma answered `row 2, Quantity (col 22)` — wrong row, column thirteen positions off
+— and wrote a fluent justification: "row 1 (which corresponds to the second data row
+in the grid structure)". It never looked anything up. It chose a cell and then
+explained it. Three runs, three different wrong cells, three confident reasons.
+
+The fix was NOT a better prompt or a bigger model. It was realising the healer should
+never have been asked: `actions.resolve()` gained a `grid-position` rank (match
+`{row, column}` when the grid's own id no longer matches, falling through if more
+than one grid shares the position). The step now resolves deterministically, instantly,
+for zero tokens — and `find_by_grid` requiring all three fields was a real gap in
+Phase 5i, not something Phase 6 introduced.
+
+Generalise it: before improving how the healer answers a question, ask whether the
+question should reach the healer at all. Anything with an exact, machine-checkable
+answer belongs in `resolve()`. The healer's real job is the FUZZY case — a renamed
+label — which it handled correctly on both the Navigator and Person Management tests.
+
+**5. Cascading heals are the dangerous failure, not a single wrong heal.**
 Observed: step 12 healed wrong -> step 13 healed wrong ON TOP of it -> the run walked
 deeper into the wrong module, each heal individually plausible, the sequence nonsense.
 `replay.py` now caps CONSECUTIVE heals (`HEALER_MAX_CONSECUTIVE`, default 3) and
@@ -133,10 +173,10 @@ stands the healer down past that. Consecutive, not total: two heals far apart ar
 unrelated Oracle changes, both legitimately repaired; two back to back mean the second
 is judging a page the first one navigated to.
 
-**5. A green run that needed healing is not a green run.** replay now says so at the
+**6. A green run that needed healing is not a green run.** replay now says so at the
 end. Without it, drift is invisible until the day it stops healing.
 
-**6. Recording goals matter now.** `test.json` has `goal: "test"`, which is worth
+**7. Recording goals matter now.** `test.json` has `goal: "test"`, which is worth
 nothing to the healer. `typetest.json` has a real one, and that is the difference
 between the model knowing it is searching for a person and guessing from labels.
 Tell teammates: the goal is not a label, it is context the repair path reads.
@@ -151,11 +191,22 @@ turns on it.
 
 ### Not done in Tier 1
 - `select` steps cannot heal — only the click/type branch is hooked.
-- The `is_grid` fix IS written (replay recomputes `is_grid` from the RESOLVED element,
-  because a healed grid cell whose step no longer carries grid identity would take the
-  `focus()` path, stay in navigation mode and swallow every keystroke silently) but is
-  UNTESTED. `test1.json` is the recording that would exercise it.
 - No write-back. That is Tier 2.
+
+The `is_grid` recompute is DONE AND CONFIRMED. replay reads `is_grid` off the RESOLVED
+element, not the step: a healed grid cell whose step lost its grid identity would
+otherwise take the `focus()` path, stay in 'navigation' mode and swallow every
+keystroke silently while still reporting PASS. Verified on a `test1` heal — the cell
+entered edit mode and the value landed.
+
+### Grid cells and the healer — the rule that came out of this
+Do NOT send a grid cell to the healer when its position survives. `resolve()` handles
+the renamed-grid case now (`grid-position` rank). The healer only sees a cell if BOTH
+the grid id and the row/column are gone — and that step is probably UNHEALABLE in
+principle, because a cell's identity IS its position and no model recovers deleted
+information. `corrupt_step.py --blank-position` produces that worst case deliberately;
+the right outcome there is the healer giving up, and Tier 2 should be able to say
+"re-record this step" rather than pretending a repair happened.
 
 ### New known issue found while testing
 Replay verifies that an element was FOUND, never that the action DID anything. A
