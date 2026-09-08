@@ -7,6 +7,7 @@ import shutil
 from report import build_doc
 from llm import heal_step
 from writeback import plan_repair, describe_repair, apply_repairs
+import baseline
 from dotenv import load_dotenv
 load_dotenv()
 SCREENSHOTS = os.getenv("SCREENSHOTS", "off").lower() == "on"
@@ -15,12 +16,122 @@ HEALER = os.getenv("HEALER", "on").lower() == "on"
 # run matches on rank 1 and pays nothing. Off switch here because a write-back
 # edits the user's recording, and recordings/ is gitignored.
 WRITEBACK = os.getenv("WRITEBACK", "on").lower() == "on"
+# PHASE 6 OUTCOME VERIFICATION, STEP 1 — capture only, compare nothing.
+# `run passed` today means every step FOUND an element, which is not the same as
+# the actions having done anything. This records what each page actually looked
+# like, so a later run has something to be checked against. It cannot change
+# whether a run passes or fails; that comes later, and only once the comparison
+# has been quiet on runs that are already trusted.
+BASELINE = os.getenv("BASELINE", "on").lower() == "on"
 # CONSECUTIVE heals, not total. Two heals far apart in a run are two unrelated
 # Oracle changes, both legitimately repaired. Heals BACK TO BACK are different:
 # each one runs on a page the previous heal navigated to, so once one is wrong
 # the rest are guaranteed garbage and the run walks further off course while
 # still reporting progress. After this many in a row, stop trusting the healer.
 MAX_CONSECUTIVE_HEALS = int(os.getenv("HEALER_MAX_CONSECUTIVE", "3"))
+
+# LEVEL 1 — "did the action actually do anything?". Actions whose silence is
+# already explained, so the warning stays worth reading:
+#   type   — perceive reports no VALUES, so a field holding "Smith" looks
+#            identical to an empty one. The sensor is blind, not the app quiet.
+#   scroll — changes what is on screen, not what exists.
+#   wait   — is not supposed to do anything.
+# Everything else that changes nothing gets a line. Measured on two real
+# recordings (26 steps) this fires once, so it is a signal and not noise.
+QUIET_EXPECTED = {"type", "scroll", "wait"}
+
+
+def _warn_if_no_change(before, after):
+    """Say so when a step left the page exactly as it found it.
+
+    WHAT THIS CATCHES, and why it is worth a line
+        The BCPC bulk job clicked a User Category combobox that never opened —
+        actions.click() sent it to focus(), which does not open a dropdown. No
+        error, step reported success, run went green, nothing happened. The next
+        step then asked the healer to find an option that was not in the DOM.
+        This check fires on the FIRST step, where the cause is.
+
+    WHAT IT CANNOT CATCH, proven in DevTools rather than assumed
+        A step whose result is legitimately nothing. `test_broken` clicks Search
+        on Manage Journals; the query runs and returns "No results found", so
+        the page is unchanged. "The action did nothing" and "the action did
+        something that produced nothing" have the identical fingerprint, and no
+        amount of tuning separates them — telling them apart needs perceive to
+        read what the page SAYS (result counts, messages, disabled buttons),
+        which it does not do yet.
+
+    So this WARNS and never fails a run.
+    """
+    if before["action"] in QUIET_EXPECTED:
+        return False
+    if not baseline.compare(before["elements"], after["elements"])["same"]:
+        return False
+    print(f"   step {before['step_index']} ({before['action']} "
+          f"{before['step_name']}) changed nothing on the page - "
+          f"confirm this step was meant to")
+    return True
+
+
+# LEVEL 2 — "is this the page the good run was on?". Two independent good runs
+# of the same recording matched at 100% on every interior step, zero elements
+# added or missing, so a strict threshold is affordable. It is a threshold and
+# not equality because Oracle pages legitimately differ on data.
+MIN_OVERLAP = float(os.getenv("BASELINE_MIN_OVERLAP", "95"))
+
+
+def _check_against_baseline(good, current):
+    """Compare this run's page against the known-good capture of the SAME step.
+
+    WHY THIS IS NOT PAGE-TO-PAGE WITHIN A RUN
+        Consecutive pages in one run overlap by 0%, 12%, 38%, 87%, 100% — every
+        value is legitimate, because navigating away from a page SHOULD replace
+        everything on it. There is no threshold to be had there. Comparing the
+        same step across two runs is the only version of the question with a
+        stable answer.
+
+    WHY STATE 0 IS EXEMPT
+        The first capture of a recording is whatever the PREVIOUS test left
+        behind, seen through a crude settle gate (invariant #10). Measured at 24
+        elements on one run and 126 on another, both fine. It is the least
+        reproducible state in any capture and must never fail a run.
+
+    WARNS, never fails. On a Redwood-style upgrade EVERY page legitimately
+    differs from its baseline, which is precisely when the healer is doing its
+    most valuable work — a check that failed the run there would be worse than
+    no check at all. It earns the right to fail only after being quiet on runs
+    already trusted.
+    """
+    if current["step_index"] == 0:
+        return False
+    diff = baseline.compare(good["elements"], current["elements"])
+    if diff["overlap"] >= MIN_OVERLAP:
+        return False
+
+    where = (f"step {current['step_index']} ({current['action']} "
+             f"{current['step_name']})")
+    print(f"   {where} does not match the known-good run: "
+          f"{diff['overlap']:.0f}% of the page is the same "
+          f"(+{len(diff['added'])} new, -{len(diff['removed'])} missing)")
+    # Only claim "same page, different data" when the evidence supports it:
+    # every difference is an element that HAS an id present on both sides, and
+    # the disagreement is over its name. That is a row showing different data.
+    #
+    # `anonymous` must be zero. Two different Time Management pages once scored
+    # 100% on id overlap because every element that DISTINGUISHED them was
+    # id-less while the shared chrome carried all the ids — and the reassuring
+    # line printed on a page that was genuinely wrong. A message that talks you
+    # out of investigating a true positive is worse than no message.
+    if (diff["anonymous"] == 0 and diff["renamed"]
+            and diff["id_overlap"] is not None
+            and diff["id_overlap"] >= MIN_OVERLAP):
+        print(f"      but every difference is an element with a known id whose "
+              f"text changed ({len(diff['renamed'])} of them) - same page, "
+              f"different data")
+    elif diff["anonymous"]:
+        print(f"      {diff['anonymous']} of the differences are elements with "
+              f"no id, so nothing identifies them - this could be a different "
+              f"page, not just different data")
+    return True
 
 def replay(page, name):
     path = f"recordings/{name}.json"
@@ -61,6 +172,33 @@ def replay(page, name):
     # the run dies later, these are dropped and the recording is untouched — the
     # next run simply degrades (or heals) again and offers the same repair.
     repairs = []                 # (step_index, {field: new_value})
+    # One captured page state per step, plus one after the last step. Dropped
+    # without being written if the run dies — a half-run is not a known-good run.
+    states = []
+    quiet_steps = []             # steps that left the page exactly as they found it
+    mismatches = []              # steps that did not match the known-good run
+
+    # LEVEL 2. Load the blessed baseline, but only USE it if it still describes
+    # this recording. A capture is tied to the step list it was taken from, so a
+    # recording that has gained or lost a step since makes every index after
+    # that point compare the wrong pages against each other — a check that is
+    # confidently wrong is worse than one that admits it cannot run.
+    good_states = None
+    if BASELINE:
+        good = baseline.load(name)
+        if good is None:
+            print("   no known-good baseline yet - this run will record one")
+        elif good.get("format") != baseline.FORMAT:
+            print(f"   baseline is format {good.get('format')}, expected "
+                  f"{baseline.FORMAT} - not comparing; delete it to recapture")
+        elif len(good["states"]) != len(recording) + 1:
+            print(f"   baseline has {len(good['states'])} states but this "
+                  f"recording has {len(recording)} steps - the recording "
+                  f"changed; not comparing, delete the baseline to recapture")
+        else:
+            good_states = good["states"]
+            print(f"   comparing against known-good run of "
+                  f"{good.get('captured', '?')}")
 
     for step_index, step in enumerate(recording):
         page.wait_for_load_state("domcontentloaded")
@@ -81,6 +219,26 @@ def replay(page, name):
             if len(elements) > 6:
                 break
             print(f"page looks empty ({len(elements)} elements), waiting...")
+
+        # Capture BEFORE acting. This perceive is the page the previous step
+        # produced, so one capture per step answers both questions we care
+        # about: state[N] matching state[N-1] means step N-1 silently did
+        # nothing, and state[N] not matching the known-good run means the flow
+        # is somewhere else. Nothing compares them yet — this only records.
+        if BASELINE:
+            current = baseline.observe(elements, step, step_index)
+            # The effect of the PREVIOUS step is the difference between the page
+            # it started on and the page this one starts on. Replay perceives
+            # before acting and never after, so the warning necessarily arrives
+            # one step late — it is labelled with the step it is about, which
+            # costs nothing, where a second perceive per step would cost a
+            # settle wait on every step of every run.
+            if states and _warn_if_no_change(states[-1], current):
+                quiet_steps.append(states[-1]["step_index"])
+            if good_states and _check_against_baseline(good_states[step_index],
+                                                       current):
+                mismatches.append(step_index)
+            states.append(current)
 
         action = step["action"]
         print(f"replaying: {action} {step.get('name', step.get('value', ''))}")
@@ -284,12 +442,100 @@ def replay(page, name):
 
         page.wait_for_timeout(3000)
 
+    if BASELINE:
+        # THE LAST STEP IS THE ONE NOBODY WATCHES. Replay perceives before
+        # acting and never after, so every step's result is seen at the top of
+        # the NEXT step — and the final action has no next step. On a recording
+        # that ends in Save, that is the single most important action in the run
+        # going unobserved. One extra perceive closes it.
+        page.wait_for_load_state("domcontentloaded")
+        try:
+            page.wait_for_load_state("networkidle", timeout=13000)
+        except:
+            pass
+        # RETRY, for the same reason the top-of-loop perceive does. The first
+        # version of this had the settle wait but no retry, and captured a page
+        # of ZERO elements on test_broken — the one capture added specifically
+        # because the last action goes unwatched was the least reliable one in
+        # the file. A page still rendering is not a result.
+        final = []
+        for attempt in range(5):
+            page.wait_for_timeout(2000)
+            try:
+                final = perceive(page)
+            except Exception as e:
+                print(f"   final perceive failed, retrying: {e}")
+                continue
+            if len(final) > 6:
+                break
+            print(f"   final page looks empty ({len(final)} elements), waiting...")
+        if final:
+            last = baseline.observe(final)
+            # THE LAST STEP IS THE ONE WORTH CHECKING MOST. On a recording that
+            # ends in Save, this is the only place the save can be seen to have
+            # done anything at all.
+            if states and _warn_if_no_change(states[-1], last):
+                quiet_steps.append(states[-1]["step_index"])
+            if good_states:
+                # The final state is indexed by step count, not step_index -
+                # it belongs to no step. Give it that index so the message
+                # points at the last step, which is what produced it.
+                last_check = dict(last, step_index=len(recording),
+                                  action="(after last step)")
+                if _check_against_baseline(good_states[-1], last_check):
+                    mismatches.append(len(recording))
+            states.append(last)
+        else:
+            print("   final page never settled — baseline not captured")
+            states = []
+
     if SCREENSHOTS and shots:
         build_doc(name, shots)
     # The run finished, so every step downstream of a repair worked on the page
     # that repair produced. That is the evidence; commit the buffer now.
     if WRITEBACK and repairs:
         apply_repairs(name, data, repairs)
+    if BASELINE and states:
+        # THE NO-LAUNDERING RULE. A passing run is allowed to define "good" only
+        # while there is nothing to check it against. Once a baseline exists, an
+        # unverified pass must NEVER quietly overwrite it — a run that resolved
+        # every locator and did nothing would rewrite the definition of a good
+        # run in its own image, and the drift would be permanent and invisible.
+        # Refreshing on a VERIFIED pass is what lets the baseline drift forward
+        # with the app the way write-back drifts the recording. That comes with
+        # the comparison; until then, first capture wins.
+        #
+        # Every run still leaves its capture in <name>.last-run.json, blessed or
+        # not. A run that records nothing can never be compared to anything, and
+        # two captures of the same recording are the only way to learn which
+        # fields are genuinely stable across runs.
+        baseline.save_last_run(name, states, goal)
+        if baseline.exists(name):
+            print(f"   baseline already recorded for '{name}' — kept; this run "
+                  f"saved to {baseline.last_run_path(name)}")
+        else:
+            path = baseline.save(name, states, goal)
+            print(f"   baseline captured: {len(states)} page states -> {path}")
+
+    if mismatches:
+        # Also not a failure, and for a sharper reason than level 1: on a
+        # Redwood-style upgrade EVERY page differs from its baseline, which is
+        # exactly the run the healer just rescued. Failing there would break the
+        # tool on the day it works best. This earns the right to fail only after
+        # it has been quiet across runs that are already trusted.
+        print(f"run passed, but {len(mismatches)} step(s) did not match the "
+              f"known-good run: {', '.join(str(i) for i in mismatches)} - the "
+              f"locators resolved, but those pages are not the ones recorded")
+
+    if quiet_steps:
+        # Deliberately NOT a failure. Some steps legitimately change nothing —
+        # a search returning no rows, proven in DevTools on test_broken step 7.
+        # This is here so a run that silently did nothing stops looking exactly
+        # like a run that worked.
+        print(f"run passed, but {len(quiet_steps)} step(s) changed nothing: "
+              f"{', '.join(str(i) for i in quiet_steps)} - if an action there "
+              f"was supposed to have an effect, this run is green for nothing")
+
     if total_heals:
         # A green run that needed healing is not the same as a green run that
         # didn't. Say so, or the drift is invisible until it stops healing.

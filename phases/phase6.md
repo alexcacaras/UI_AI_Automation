@@ -416,28 +416,205 @@ anything. That is knowingly accepted, and the backup plus provenance are the mit
 not provably right, but recoverable and auditable. The real fix is outcome verification
 (below), and until that exists no gate will do its job.
 
-## THE NEXT THING — outcome verification (blocks Tier 3, unblocks everything)
-There is still no machine definition of "the test worked". `run passed` means every step
-found an element. It does not mean the timecard saved, the category changed, or the
-person was found. A `typetest` run once ended inside an open cascading menu, having
-navigated nowhere, and printed `run passed`.
+## OUTCOME VERIFICATION — levels 1 and 2 (2026-09-08)
 
-Design agreed, not built — compare STRUCTURE, not pixels:
-- On a known-good run, save a baseline per step: the set of element names/ids `perceive`
-  saw. Store it with the recording.
-- On later runs, compare. A step landing somewhere structurally different is a real
-  failure even when every locator resolved.
-- Pixel diffing is the wrong tool — Oracle pages legitimately differ on employee names,
-  timestamps and row counts. Structure is stable; pixels are not.
-- Screenshots stay for HUMANS to audit. Vision (Tier 3) becomes the escalation when the
-  structural check is ambiguous.
+`run passed` meant every step FOUND an element. It did not mean the timecard saved, the
+category changed, or the person was found. A `typetest` run once ended inside an open
+cascading menu, having navigated nowhere, and printed `run passed`.
 
-Compare against the LAST KNOWN-GOOD run, not the original recording: write-back already
-means the recording drifts forward with the application.
+Four levels. Level 0 was all we had:
 
-Evidence this is the missing piece: on the BCPC bulk job the only thing that caught a
-silent no-op was ORACLE disabling its own Save button because nothing had changed. The
-application knew the task had not happened. The tool did not.
+    0. every step found an element          <- what `run passed` meant
+    1. each action actually DID something
+    2. the flow ended on the right page
+    3. the right outcome for the right record
+
+### BUILT: the capture (`baseline.py`)
+`fingerprint(elements)` reduces one perceive to sorted `[id, name, count]` triples;
+`observe()` labels one with its step; `save`/`save_last_run`/`load` store them under
+`recordings/baselines/` (which inherits the `recordings/` gitignore — a baseline holds
+the same employee data a recording does).
+
+`replay.py` captures one state per step plus one after the last step, and writes them at
+the end of a passing run. `BASELINE=off` in `.env` disables the whole thing.
+
+Three decisions in that sentence, each with a reason:
+
+- **`(id, name)` pairs, not separate id and name sets.** The same signature
+  `actions.did_change` uses, for the reason in invariant #5: split them and every
+  id-less element collapses to one entry. Reusing it also means level 1 is the check
+  the codebase ALREADY has, applied in a new place, rather than a second definition of
+  "changed" that can drift from the first.
+- **WITH A COUNT.** A Redwood Navigator page perceives 126 elements that collapse to 28
+  distinct pairs — 78% of the page is a duplicate of something else. As a plain set, an
+  action adding a fourth copy of something already there three times is invisible. Row
+  counts do legitimately vary, so a comparison may end up ignoring the number; storing
+  it lets the comparison DECIDE. A field never captured cannot be reconsidered later.
+  (`"format": 2` in the file. Format 1 was pairs. Bump it when the triple changes — a
+  stale capture must be detectable, not silently misread as counts of zero.)
+- **A CAPTURE AFTER THE LAST STEP.** Replay perceives BEFORE acting and never after, so
+  every step's result is seen at the top of the NEXT step — and the last step has no
+  next step. On a recording ending in Save, the most important action in the run was the
+  one action nothing could observe.
+
+### BUILT: level 1 — "did the action do anything?"
+`_warn_if_no_change` in `replay.py` compares the page a step started on with the page
+the next step starts on. If nothing moved, it prints one line naming the step, and an
+end-of-run summary. It NEVER changes pass/fail.
+
+`type`, `scroll` and `wait` are exempt: perceive reports no VALUES (a field holding
+"Smith" fingerprints identically to an empty one — blind sensor, not quiet app),
+scrolling changes what is on screen rather than what exists, and a wait is not supposed
+to do anything. Printing those every run trains you to ignore the line.
+
+The warning arrives ONE STEP LATE by construction, labelled with the step it is about.
+Printing it on time would need a second perceive per step — a settle wait on every step
+of every run, to move a log line earlier.
+
+What it exists for: the BCPC combobox that never opened. `actions.click()` sent it to
+`focus()`, no error, step reported success, run green, nothing happened — and the NEXT
+step then asked the healer to find an option that was not in the DOM (lesson 8). This
+fires on the first step, where the cause is.
+
+### THE CEILING OF LEVEL 1 — measured in DevTools, not assumed
+On two real recordings (26 steps) level 1 fired exactly once: `test_broken` step 7,
+`click Search` on Manage Journals. Chased it in the browser rather than the code:
+
+    actionable 207 -> 207, table rows 305 -> 305, and the page says "No results found."
+
+The click WORKED. The query ran. It returned an empty set, so ADF re-rendered the same
+empty table. **"The action did nothing" and "the action did something that produced
+nothing" have the IDENTICAL fingerprint, and no amount of tuning separates them.** That
+is why level 1 warns and must never fail a run.
+
+Control test on a pod with data: the same search returning two rows moved 49 elements
+(217 -> 168 — the ADF query panel COLLAPSES on results, taking ~49 form controls with
+it, while the result rows add back a handful of links). So a search WITH results is
+loudly observable; only the empty one is silent. There is no perceive gap here to fix.
+
+### What level 2 can afford — the number that decides it
+Two independent good runs of the same recording, compared step for step:
+**100% overlap on every interior step, zero elements added or missing.** Including the
+Person Management results page carrying live employee data. Structure is far more
+stable run-to-run than the design assumed, so a strict threshold is affordable.
+
+Two exceptions, both explained and both worth knowing:
+- **State 0 is the least reproducible state in any capture** (24 vs 126 elements). It is
+  whatever the PREVIOUS test left behind, perceived through the crude settle gate
+  (invariant #10). Treat it as informational, never as a failure.
+- A capture taken before the final-perceive retry existed held `n=0`. See below.
+
+### Data rows carry live data INTO the fingerprint
+Journal result rows are `<a>` elements, so perceive names them by inner text:
+`"Record $39,151 RBC Loan ..."`. Two consequences. The baseline file contains financial
+and employee data, exactly like a recording — hence living under gitignored
+`recordings/`. And level 2 must tolerate name churn on data rows: on a results page the
+ids are structure and the names are data.
+
+### Bug worth not repeating
+The first version of the after-the-last-step capture copied the settle wait from the top
+of the replay loop but NOT its retry, and captured a page of ZERO elements. The one
+capture added specifically because the last action goes unwatched was the least reliable
+one in the file. A page still rendering is not a result — if you perceive, retry.
+
+### The finding that outgrew the plan — perceive cannot read what the page SAYS
+"No results found." was written on the screen. Oracle disabled its own Save button on
+the BCPC job because nothing had changed. In both cases the APPLICATION knew the task
+had not happened and said so, and the tool could not read it: `ACTIONABLE` collects
+things you can click or type into, so status text, result counts, validation messages,
+error banners and disabled state are all invisible.
+
+The instinct was "add `value` to perceive so level 1 can see typing". That is the small
+version. The valuable version is reading the page's own account of itself. It deserves
+its own design pass, not a bolt-on — and note the ripple: `did_change` compares
+perceived elements, so richer elements change what AUTHORING mode decides to keep
+(loop.py's `did_change` gate), not just what replay verifies.
+
+### BUILT: level 2 — "is this the page the good run was on?"
+`_check_against_baseline` in `replay.py` compares this run's capture of step N against
+the BLESSED baseline's capture of step N. Warns below `BASELINE_MIN_OVERLAP` (default
+95). Never fails a run — on a Redwood-style upgrade every page legitimately differs from
+its baseline, which is precisely the run the healer just rescued.
+
+The baseline is loaded once and REFUSED if it no longer describes the recording (wrong
+`format`, or a state count that does not match the step count). A check that is
+confidently wrong is worse than one that admits it cannot run.
+
+Same step across two runs, never page-to-page within one run: consecutive pages in a
+single run overlap by 0%, 12%, 38%, 87%, 100%, and every one of those is legitimate,
+because navigating away from a page SHOULD replace everything on it. There is no
+threshold to be had there.
+
+### PROVEN: the first wrong-place run the tool has ever caught
+`corrupt_step.py` breaks a LOCATOR, which normally fails at level 0 anyway. Level 2's
+unique value is the run where everything resolves and the flow still ends up somewhere
+else, so the test had to be built differently: `test_wrongplace` is `test_broken` with
+only the LAST step retargeted from `Team Time Cards` to `Time Entries` — a real sibling
+link on the same page, so every locator resolves — compared against the Team Time Cards
+baseline.
+
+    run passed
+    step 14 does not match the known-good run: 41% of the page is the same
+
+Note what this proves: phase6.md tells you never to break the LAST step when testing the
+healer, because a wrong pick there still reports PASS with nothing downstream to catch
+it. Level 2 is aimed at exactly that blind spot — the step the healer harness cannot
+test is the one this proves.
+
+Worth building `divert_step.py` next to `corrupt_step.py`: corrupt breaks a locator to
+test the healer, divert retargets a step to test verification. Different bug, different
+harness.
+
+### LESSON — a reassuring message on a true positive is worse than no message
+Level 2 shipped with a second line meant to separate "same page, different data" from
+"wrong page": if the ids still matched, say so. On the wrong-place run it printed
+
+    but 100% of the ids match - structure looks right, the data on the page differs
+
+on a page that was genuinely wrong. Cause: **every element that DISTINGUISHED the two
+Time Management pages was id-less** ("Attestations", "Time Card Status", "Group" vs
+"Group Name"), while all the shared chrome carried the ids. `id_overlap` answers "do the
+identified elements match?", and that says NOTHING about elements that were never
+identified — which on Redwood pages is most of them (126 perceived, 28 distinct pairs).
+
+Fixed by asking what data churn actually LOOKS like in the fingerprint: the SAME id
+carrying a different name (an ADF row cell `AP1:t1:0:cl2` whose text is an employee
+name). `compare()` now returns `renamed` for that, and `anonymous` for differences among
+id-less elements. The reassurance is printed only when `anonymous` is zero; otherwise
+the line says the opposite — that nothing identifies the differing elements, so this
+could be a different page.
+
+Generalise it: a check that produces a calming explanation must be held to a HIGHER
+standard than one that raises an alarm, because the alarm gets investigated and the
+explanation ends the investigation.
+
+### Answered while testing: the "benefits" write-back was CORRECT
+An open question above: step 3 wrote back id `..._groupNode_benefits` for an element
+named `My Client Groups`, flagged as unresolved. It is fine. **Oracle's Navigator
+groupNode ids are not semantically tied to their labels** — on this pod `General
+Accounting` has id `..._groupNode_cash_management` and `Projects` has
+`..._groupNode_general_accounting`. The suffix is positional. Never read meaning into a
+groupNode id suffix, and never let one talk you out of a correct match.
+
+### Still true, and still the plan for level 2
+Compare STRUCTURE, not pixels — Oracle pages legitimately differ on employee names,
+timestamps and row counts. Compare against the LAST KNOWN-GOOD run, not the original
+recording, because write-back already drifts the recording forward with the app.
+Screenshots stay for HUMANS to audit; vision (Tier 3) is the escalation for when the
+structural check is ambiguous.
+
+**The no-laundering rule.** A passing run may define "good" only while there is nothing
+to check it against — first capture wins. Once a baseline exists, an unverified pass
+must NEVER overwrite it, or a run that resolved every locator and did nothing rewrites
+the definition of a good run in its own image, permanently and invisibly. Refreshing on
+a VERIFIED pass is what lets the baseline drift forward with the app. Every run still
+leaves `<name>.last-run.json` regardless, because a run that records nothing can never
+be compared to anything.
+
+### Tools
+- `py baseline_report.py <recording>` — offline, no browser: which steps changed
+  nothing, what changed on the ones that did (`-v`), `--last-run` for the unblessed
+  capture. Same reason `test_heal.py` exists: seconds per iteration.
 
 ## Parked / future (recorded so ideas aren't lost)
 - **Auto re-run to VERIFY a repair (Tier 2b).** After a healed run writes its
