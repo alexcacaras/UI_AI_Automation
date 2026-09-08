@@ -6,10 +6,15 @@ from actions import (click, fill_by_name, scroll, select_option_forgiving,
 import shutil
 from report import build_doc
 from llm import heal_step
+from writeback import plan_repair, describe_repair, apply_repairs
 from dotenv import load_dotenv
 load_dotenv()
 SCREENSHOTS = os.getenv("SCREENSHOTS", "off").lower() == "on"
 HEALER = os.getenv("HEALER", "on").lower() == "on"
+# PHASE 6 TIER 2. Repair a recording whose locators have drifted, so the next
+# run matches on rank 1 and pays nothing. Off switch here because a write-back
+# edits the user's recording, and recordings/ is gitignored.
+WRITEBACK = os.getenv("WRITEBACK", "on").lower() == "on"
 # CONSECUTIVE heals, not total. Two heals far apart in a run are two unrelated
 # Oracle changes, both legitimately repaired. Heals BACK TO BACK are different:
 # each one runs on a page the previous heal navigated to, so once one is wrong
@@ -50,6 +55,12 @@ def replay(page, name):
         os.makedirs(shot_dir, exist_ok=True)
     consecutive_heals = 0        # reset by any step that resolves on its own
     total_heals = 0              # reported at the end of the run
+    # Repairs are BUFFERED, not written when they are found. A repair claims the
+    # new locator points at the element the step meant, and the evidence for that
+    # claim is the rest of the run working from the page this step landed on. If
+    # the run dies later, these are dropped and the recording is untouched — the
+    # next run simply degrades (or heals) again and offers the same repair.
+    repairs = []                 # (step_index, {field: new_value})
 
     for step_index, step in enumerate(recording):
         page.wait_for_load_state("domcontentloaded")
@@ -91,6 +102,7 @@ def replay(page, name):
                 page.wait_for_timeout(2000)
 
             healed = False
+            heal_reason = ""
             if el is None and HEALER:
                 # PHASE 6 TIER 1. The deterministic finder has exhausted its five
                 # retries, so this run is already dead — the healer costs nothing
@@ -108,6 +120,11 @@ def replay(page, name):
                         print(f"   healer gave up: {reason}")
                     else:
                         healed = True
+                        heal_reason = reason
+                        # The rank was "no match" — that is what SENT us to the
+                        # healer. Now that one has answered, say so, so write-back
+                        # can tell a healed step from an unresolvable one.
+                        rank = "healed"
                         consecutive_heals += 1
                         total_heals += 1
                         print(f'   HEALED -> {el["index"]}: <{el["tag"]}> "{el["name"]}" '
@@ -134,9 +151,25 @@ def replay(page, name):
             # falls back still passes today, but it is drifting — this is the
             # warning you get before it breaks (and what the Phase 6 healer
             # will want to know about a step).
-            if rank not in ("grid", "id"):
+            # A healed step already printed its own HEALED line; calling that
+            # "degraded" as well would be noise.
+            if rank not in ("grid", "id", "healed"):
                 print(f"   locator degraded -> matched on {rank} "
                       f"(recorded id: {step.get('id') or '(none)'})")
+
+            if WRITEBACK:
+                # plan_repair returns None for anything it should not touch: a
+                # rank-1 match (nothing to fix) and a GUESS (no evidence which of
+                # the candidates is right, and repairing it would delete the
+                # warning that the step is ambiguous).
+                changes = plan_repair(step, el, rank, heal_reason)
+                if changes:
+                    repairs.append((step_index, changes))
+                    print(f"   repair queued for this step:")
+                    print(describe_repair(changes, step))
+                elif rank.startswith("GUESS"):
+                    print(f"   NOT repaired: {rank} is a guess, not an "
+                          f"identification — this step needs scoping or a re-record")
 
             if action == "click":
                 click(page, el["index"])
@@ -194,11 +227,53 @@ def replay(page, name):
                 print(f"select '{step['name']}' not found yet, re-perceiving...")
                 page.wait_for_timeout(2000)
 
+            # PHASE 6. Same healer hook as the click/type branch above — a select
+            # step that loses its locator is no different from a click that does,
+            # and leaving it out meant one action type could not be repaired at
+            # all. KEEP THE TWO IN SYNC: a change to the heal/write-back rules
+            # here needs the same change up there (they are separate blocks only
+            # because click/type also scrolls virtualized grids while retrying).
+            healed = False
+            heal_reason = ""
+            if el is None and HEALER:
+                if consecutive_heals >= MAX_CONSECUTIVE_HEALS:
+                    print(f"   healer stood down: {consecutive_heals} heals in a row "
+                          f"already — this run has probably lost its place")
+                else:
+                    print(f"couldn't find select {step['name']} — asking the healer...")
+                    el, reason = heal_step(step, elements, goal, rank,
+                                           steps=recording, step_index=step_index)
+                    if el is None:
+                        print(f"   healer gave up: {reason}")
+                    else:
+                        healed = True
+                        heal_reason = reason
+                        rank = "healed"
+                        consecutive_heals += 1
+                        total_heals += 1
+                        print(f'   HEALED -> {el["index"]}: <{el["tag"]}> "{el["name"]}" '
+                              f'id={el.get("id") or "(none)"}')
+                        print(f"   reason: {reason}")
+
+            if not healed:
+                consecutive_heals = 0
+
             if el is None:
                 print(f"couldn't find select {step['name']}, stopping")
                 return False
-            if rank not in ("grid", "id"):
+            if rank not in ("grid", "id", "healed"):
                 print(f"   locator degraded -> matched on {rank}")
+
+            if WRITEBACK:
+                changes = plan_repair(step, el, rank, heal_reason)
+                if changes:
+                    repairs.append((step_index, changes))
+                    print(f"   repair queued for this step:")
+                    print(describe_repair(changes, step))
+                elif rank.startswith("GUESS"):
+                    print(f"   NOT repaired: {rank} is a guess, not an "
+                          f"identification — this step needs scoping or a re-record")
+
             select_option_forgiving(page, el["index"], step["value"])
 
         if SCREENSHOTS:                                           
@@ -211,6 +286,10 @@ def replay(page, name):
 
     if SCREENSHOTS and shots:
         build_doc(name, shots)
+    # The run finished, so every step downstream of a repair worked on the page
+    # that repair produced. That is the evidence; commit the buffer now.
+    if WRITEBACK and repairs:
+        apply_repairs(name, data, repairs)
     if total_heals:
         # A green run that needed healing is not the same as a green run that
         # didn't. Say so, or the drift is invisible until it stops healing.

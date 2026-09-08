@@ -92,6 +92,92 @@ Oracle to change. TWO THINGS MUST BE BROKEN, not one:
   you and you never have to trust the model's stated reason. Breaking the last step
   of a recording tests nothing: a wrong pick still reports PASS.
 
+## CASE STUDY — a classic-Navigator recording surviving Oracle's Redwood shell
+### (2026-09-04, unplanned. This is the proof the whole phase exists for.)
+
+Not a manufactured break. `typetest_broken` was replayed expecting to test ONE
+corrupted step, and instead the pod had been upgraded underneath it: the classic
+Navigator was gone, replaced by the Redwood shell, and every navigation id had
+been renamed from `pt1:_UISnvr:0:nvgpgl2_*` to `ojSpSimpleUIShellNavigator_*`.
+
+A recording made against the old UI. A page that no longer has any of its ids.
+**The run finished, on the right record, and reported PASS.**
+
+What each step did:
+
+| step | recorded | what happened |
+|------|----------|---------------|
+| 1 | click `Oracle Logo Home` (id `pt1:_UIScil1u`) — NOT corrupted | id gone → 5 retries → HEALED |
+| 2 | click `Navigator` (id `pt1:_UISmmLink`) | id gone → resolved on **name+tag**, new id `ojSpSimpleUIShellNavigator_NAVa5` |
+| 3 | click `My Client Groups` | id gone → resolved on **name+tag** |
+| 5 | click `Person Management` | id gone → HEALED |
+| 6 | click `Name` (the search input) | HEALED |
+| 7 | type into `Person Name` (the deliberately corrupted step) | HEALED → `<input> "Name"` id `_FOpt1:…SP3:q1:value00::content` |
+| 9-11 | More Information, Actions, Assignment Status | **resolved on their recorded ids, no healing** |
+
+TWO layers did the work, and telling them apart matters:
+
+- **Ranked locators (no LLM, no cost) carried steps 2 and 3.** The ids were gone;
+  the names were not. This is Phase 5i paying for itself — before ranked locators
+  these two steps would have been heal requests, and the healer would have had
+  four extra chances to be wrong.
+- **The healer carried steps 1, 5, 6 and 7** — the ones where the label itself had
+  moved, which is the fuzzy case it is actually good at.
+
+### Why the "wrong-looking" heals were not wrong
+
+Read in isolation the heals look bad: `Oracle Logo Home` healed to an `Actions`
+button, `Person Management` healed to a link named `My Client Groups`, `Name`
+healed to a link named `Person Management`. Reviewed live, that looked like a
+four-heal cascade and was nearly written up as one.
+
+It was not. Redwood restructured the navigation, so the recording's steps no
+longer map one-to-one onto the new UI — and each heal picked the element the
+FLOW needed at that point rather than the one the step's label named. The
+sequence re-aligned itself to the new shell.
+
+**The evidence, and the only part of this that is not interpretation:**
+
+1. Step 7 healed onto `_FOpt1:…SP3:q1:value00::content` — the exact id recorded in
+   the uncorrupted `typetest.json`. It arrived precisely where the recording meant
+   to be.
+2. Steps 9, 10 and 11 then resolved **deterministically on their recorded ids**.
+   Those ids only exist on the Person Management results page. No model was
+   involved in that; either they are on the page or they are not.
+
+A recording is its own oracle. Later steps resolving on their original ids is
+proof of position that no stated reason from a model can give you, and it is why
+phase6.md tells you to break a step that LATER steps depend on.
+
+### Why MAX_CONSECUTIVE correctly did not fire
+
+Four heals in one run, and the cap (3) never tripped — because heals were
+separated by steps that resolved on their own. That is the invariant working as
+designed, not a near miss: a step resolving deterministically PROVES the page is
+the expected one, which retires the cascade worry the counter exists for.
+
+### What this case study is evidence FOR
+
+That the product thesis holds: **agency at authoring and repair time,
+determinism in the hot path.** Oracle ships UI changes continuously. A
+traditional recorded regression suite breaks on an upgrade and a human re-records
+it. This one absorbed a shell replacement — a rename of every navigation id in
+the flow — and kept running, on a local 8B model, without a human.
+
+### What it is NOT evidence for
+
+- **That heals are self-checking.** Nothing in the run verified the heals. They
+  were validated afterwards, by a human reading which ids resolved later. A run
+  where the heals were wrong would have looked identical up to the moment it
+  didn't.
+- **That the write-back from this run is trustworthy.** Step 3 wrote back id
+  `ojSpSimpleUIShellNavigator_groupNode_benefits` for an element named
+  `My Client Groups`. Unique name+tag match, so `resolve()` believed it — but the
+  id says *benefits*. Unresolved; the next replay answers it. Backup:
+  `recordings/backups/typetest_broken.20260904-122459.json`.
+- **That it generalises to parameterised runs.** Heals are chosen against one
+  page state. The same heal on a different user's page may not apply.
+
 ## HARD-WON LESSONS (cost most of a session — read before blaming a model)
 
 **1. Ollama's `num_ctx` silently truncates. This is the big one.**
@@ -181,6 +267,25 @@ nothing to the healer. `typetest.json` has a real one, and that is the differenc
 between the model knowing it is searching for a person and guessing from labels.
 Tell teammates: the goal is not a label, it is context the repair path reads.
 
+**8. A heal request can be a symptom of a broken ACTION, not a broken locator.**
+The BCPC bulk job asked the healer "which element is `BCPC_TRUSTEES`?" on a page
+where the User Category dropdown had never opened — because `actions.click()`
+sent the combobox to `.focus()`, which does not open it (see phase2.md, "focus()
+is not a click"). The option was not in the DOM. There was no correct answer, and
+the healer was about to invent a plausible one.
+
+This is 4c's rule with a second class added. Questions that should never reach
+the healer:
+  - **exactly answerable** — belongs in `resolve()` (4c: grid row/column);
+  - **unanswerable because the PREVIOUS step silently did nothing** — belongs in
+    a bug fix.
+Only the genuinely fuzzy case is the healer's job.
+
+Practical tell: when a heal request appears for an element that should obviously
+be on screen, suspect the step BEFORE it before suspecting the locator. Replay
+verifies an element was FOUND, never that the action DID anything, so a no-op
+step is invisible until the next step cannot find what it produced.
+
 ### Unproven, kept anyway
 The recorded-path context (all steps, with the failing one marked, plus "the steps
 after this must stay reachable") is built and costs ~270 tokens. It has NOT been shown
@@ -189,9 +294,17 @@ prompt variant passes them. Keep it (rare call, cheap, can only help on hard cas
 but do not claim it works until a heal with several equally-plausible candidates
 turns on it.
 
-### Not done in Tier 1
-- `select` steps cannot heal — only the click/type branch is hooked.
-- No write-back. That is Tier 2.
+### Not done in Tier 1 — BOTH CLOSED 2026-09-08
+- ~~`select` steps cannot heal~~ — DONE. The `select` branch now has the same healer
+  hook and write-back as click/type. Worth knowing what `select` means here: a NATIVE
+  `<select>` element driven by `select_option`. Oracle's Redwood/ADF dropdowns are
+  divs, inputs and `<li role="option">`, so they were always recorded as CLICKS and
+  always healed. Only 4 `select` steps exist across every recording — a small hole,
+  but "this action type cannot be repaired" is the kind of gap that confuses for an
+  hour when it finally bites.
+  The two branches are separate blocks (click/type also scrolls virtualized grids
+  while retrying) and carry comments saying they must be changed together.
+- ~~No write-back~~ — DONE. See TIER 2 below.
 
 The `is_grid` recompute is DONE AND CONFIRMED. replay reads `is_grid` off the RESOLVED
 element, not the step: a healed grid cell whose step lost its grid identity would
@@ -228,16 +341,119 @@ for id-less elements — the thing that was blocking it. Replay already prints
 a repair candidate BEFORE it ever fails. Feeding that rank to the healer is likely more
 valuable than the goal string.
 
-## Act 2 — write-back (NEXT PHASE, not now)
-After a successful heal, write the corrected locator back into the recording so the
-NEXT run finds it deterministically and never calls the LLM again. This is what makes
-the recording LEARN. Deferred deliberately:
-- For id-full elements: write back the new id — clean.
-- For id-less elements (calendar cells, some Oracle divs): there's no id to write. This
-  forces Phase 0's RANKED LOCATORS — append a new way to find it (scoped CSS / position),
-  re-ranking over time. That's a real chunk of design; keep it out of Act 1.
+## TIER 2 — WRITE-BACK. DONE AND PROVEN (2026-09-08)
+
+After a step resolves on anything looser than the tightest locator — including a heal —
+the recording is repaired, so the next run matches at rank 1 and pays nothing. This is
+what makes a recording LEARN instead of decay.
+
+`writeback.py`: `plan_repair(step, el, rank, reason)` decides what to change,
+`apply_repairs(name, data, repairs)` backs up and writes. `replay.py` buffers repairs
+and commits them at the end of a passing run.
+
+### Proof (the numbers, not an opinion)
+| recording | before | after |
+|---|---|---|
+| `test1_broken` | step 7 `grid-position` | silent, rank 1 |
+| `test_broken` | 1 heal | 0 heals |
+| `typetest_broken` | 4 heals + 2 degraded | 0 heals, 0 degraded |
+
+Five model calls across two recordings, then zero, permanently. `typetest_broken` is
+the strong case: it re-aligned a classic-Navigator recording onto the Redwood shell
+(see the case study above) and then FROZE that alignment into the file.
+
+### WHEN it writes — end of a passing run, from a buffer. Never at resolve time.
+A repair claims the new locator points at the element the step meant, and the evidence
+is the rest of the run working from the page that step landed on. The asymmetry decides
+it: buffering and losing a repair to a later failure costs ONE RUN (the next run
+re-degrades and offers it again); writing early and being wrong costs the RECORDING,
+and `recordings/` is gitignored so there is no `git checkout` to undo it.
+
+### What it writes, per rank
+| rank | repair |
+|---|---|
+| `grid` / `id` | nothing — already tightest |
+| `grid-position` | refresh `grid`; keep `row`/`column`; force `id` blank (invariant #12) |
+| `name+tag` unique | write today's `id` (or blank if the element has none); refresh `name`/`tag` |
+| `healed` | same, plus `healed_from` provenance |
+| `GUESS name+tag` | **NOTHING. Reported only.** |
+
+A GUESS means several elements matched and `resolve()` took the first, with no evidence
+it is the right one. Writing that id back would freeze an arbitrary pick as rank-1 truth
+AND delete the loud GUESS warning that is the only signal the step is ambiguous — the
+drift would go invisible at the same moment it went permanent.
+
+### Provenance — the recording has to explain itself
+A heal rewrites the locator, so without provenance a step silently stops describing what
+a human meant: `"Oracle Logo Home"` becomes `"Actions"` and nobody can tell what the step
+was ever for. Each repaired step keeps:
+
+```json
+"healed_from": {"name": "...", "id": "...", "tag": "...",
+                "when": "2026-09-08", "reason": "<the model's own words>",
+                "originally": "<the label a HUMAN recorded>"}
+```
+
+`originally` survives repeated heals — every later repair overwrites the immediate
+previous locator, but the human's label is the one never to lose. Backups
+(`recordings/backups/`, newest 5) restore the whole file; provenance lets you revert one
+step. Together they are version control where the machine is one of the authors.
+
+### TWO GATES WERE TRIED AND BOTH WERE WRONG. Do not re-invent them.
+1. **"a heal followed by another heal is suspect."** No. In a whole-UI migration
+   consecutive heals are what a legitimate repair LOOKS like.
+2. **"only write back if a later step resolves at rank 1."** No. In a total id change
+   NOTHING resolves at rank 1 anywhere, so this refuses to repair exactly the case the
+   healer exists for.
+
+Both failed identically: they infer "did this work?" from HOW LOCATORS RESOLVED, which
+is a property of the locators, not of the task. In a total UI change every
+locator-derived signal goes to zero while the task may have completed perfectly.
+
+**So the evidence write-back actually runs on is "the run completed", which is weaker
+than it sounds** — replay verifies an element was FOUND, never that the action DID
+anything. That is knowingly accepted, and the backup plus provenance are the mitigation:
+not provably right, but recoverable and auditable. The real fix is outcome verification
+(below), and until that exists no gate will do its job.
+
+## THE NEXT THING — outcome verification (blocks Tier 3, unblocks everything)
+There is still no machine definition of "the test worked". `run passed` means every step
+found an element. It does not mean the timecard saved, the category changed, or the
+person was found. A `typetest` run once ended inside an open cascading menu, having
+navigated nowhere, and printed `run passed`.
+
+Design agreed, not built — compare STRUCTURE, not pixels:
+- On a known-good run, save a baseline per step: the set of element names/ids `perceive`
+  saw. Store it with the recording.
+- On later runs, compare. A step landing somewhere structurally different is a real
+  failure even when every locator resolved.
+- Pixel diffing is the wrong tool — Oracle pages legitimately differ on employee names,
+  timestamps and row counts. Structure is stable; pixels are not.
+- Screenshots stay for HUMANS to audit. Vision (Tier 3) becomes the escalation when the
+  structural check is ambiguous.
+
+Compare against the LAST KNOWN-GOOD run, not the original recording: write-back already
+means the recording drifts forward with the application.
+
+Evidence this is the missing piece: on the BCPC bulk job the only thing that caught a
+silent no-op was ORACLE disabling its own Save button because nothing had changed. The
+application knew the task had not happened. The tool did not.
 
 ## Parked / future (recorded so ideas aren't lost)
+- **Auto re-run to VERIFY a repair (Tier 2b).** After a healed run writes its
+  repairs back, go Home and replay the recording again automatically. A second run
+  that needs NO healing is machine-checkable proof the repair was right; today
+  that proof only exists because a human reads the log. This closes the gap the
+  Redwood case study exposes — the heals there were correct, but nothing in the
+  system knew it.
+  **The blocker is side effects, and it is a hard one.** Re-running is free for a
+  read-only navigation flow and destructive for anything that CREATES a record —
+  a second pass books the absence twice. So this needs recordings to declare
+  whether they are safe to repeat (a `rerun_safe` flag set at record time), and
+  the default must be NO. Worth building for the navigation-heavy regression
+  suites, which are the ones that break on Oracle upgrades anyway.
+  Narrower variant if the flag proves unworkable: re-run only far enough to
+  re-resolve the healed step, not the whole flow.
 - Tier 3 vision — the privacy question now has a concrete example rather than a
   worry. A `typetest` run ended on a Person Management results page showing two
   employees' names, person numbers and national IDs. The ELEMENT LIST from that page
