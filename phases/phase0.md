@@ -174,7 +174,7 @@ credentials:
   password_env: "EXAMPLECO_TEST_PASSWORD"   # actual secret lives in .env
 
 login_settings:
-  email_domain: "@pensionsbc.ca"       # SSO domain (was hardcoded in microsoft page object)
+  email_domain: "@exampleco.com"       # SSO domain (was hardcoded in microsoft page object)
 
 modules:                                # which modules this client tests
   scm: { enabled: true }

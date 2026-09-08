@@ -3,13 +3,58 @@
 #=============================================
 #---------------helper actions---------------
 #=============================================
+# Input types where focus() is the whole interaction — you land in the field and
+# the next step types. Anything NOT in here (checkbox, radio, or any input with
+# role=combobox) has behaviour that only a real click triggers.
+TEXT_INPUT_TYPES = {"", "text", "email", "password", "search", "tel", "url", "number"}
+
+
 def click(page, index):
+    """Click an element, or focus it when focus IS the click.
+
+    WHY THIS IS NOT JUST locator.click()
+        Text inputs are clicked to put the caret in them, and a real click there
+        can be intercepted by an overlay and throw. focus() does the same job
+        without touching the page visually, so text fields take that path.
+
+    WHY THIS IS NOT JUST focus() FOR EVERY INPUT (the bug this fixes)
+        focus() on a checkbox does not tick it. focus() on an Oracle combobox
+        does not open it. Both then report success, the run goes green, and
+        NOTHING HAPPENED — the silent no-op in the known-bugs list. It cost a
+        real run: the User Category dropdown never opened, so the option the
+        next step wanted did not exist, five retries failed and the healer was
+        asked a question with no correct answer on the page.
+
+    Playwright's click is a TRUSTED event sequence — pointerdown, mousedown,
+    mouseup, click, at real coordinates. That matters here because ADF opens its
+    dropdowns on mousedown. It is not the same thing as el.click() in the
+    devtools console, which fires one synthetic click and opens nothing; a
+    console test failing does not mean this will.
+    """
     locator = page.locator(f'[data-ai-index="{index}"]')
-    tag = locator.evaluate("el => el.tagName.toLowerCase()")
-    if tag in ("input", "textarea", "select"):
-        locator.focus()      # inputs: focus dodges the hint-overlay intercept
-    else:
+    el = locator.evaluate("""el => ({
+        tag: el.tagName.toLowerCase(),
+        type: (el.getAttribute('type') || '').toLowerCase(),
+        role: (el.getAttribute('role') || '').toLowerCase(),
+    })""")
+
+    typing_target = (
+        el["tag"] == "textarea"
+        or (el["tag"] == "input" and el["type"] in TEXT_INPUT_TYPES)
+    )
+    if typing_target and el["role"] != "combobox":
+        locator.focus()      # text fields: focus dodges the hint-overlay intercept
+        return
+
+    try:
         locator.click()
+    except Exception as e:
+        # The intercept the original focus()-everything rule was avoiding. Fall
+        # back rather than fail the run, but say so — a combobox that lands here
+        # has NOT opened, and the next step is about to look for something that
+        # is not there.
+        print(f"   click intercepted, falling back to focus(): {e}")
+        locator.focus()
 
 def fill_by_name(page, name, value):
     try:

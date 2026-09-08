@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react'
 import './App.css'
 
 function App() {
-  const [url, setUrl] = useState(
-    'https://login-etnu-test-saasfaprod1.fa.ocs.oraclecloud.com'
-  )
+  // Starts empty on purpose. This used to default to a real customer pod
+  // hostname, which put that hostname in a committed source file — the exact
+  // thing BASE_URL in .env exists to prevent. Paste the pod URL here, or set
+  // BASE_URL in .env (main.py reads it directly).
+  const [url, setUrl] = useState('')
 
   const [operation, setOperation] = useState('record')
 

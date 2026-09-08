@@ -179,3 +179,63 @@ Port the locked console JS into a Python function on a real Playwright page:
 
 This becomes the perception core of the new `main.py` engine (Phase 3 loop later
 consumes it).
+---
+
+## Two perception lessons found in the field (2026-09-08)
+
+### 1. An element exists only if it is in `ACTIONABLE`
+`perceive.py:6` is an explicit whitelist of selectors. Perception does NOT scan the
+page — it queries that list. Anything not matching is never looked at, never named,
+never stamped with `data-ai-index`, and is therefore invisible to recording, replay,
+the healer and AI mode alike.
+
+Same mental model as phase2's "commands only exist if you write the `elif`": the
+tool's vocabulary IS the list you wrote.
+
+Found via an ADF date picker whose day cells are `<td role="gridcell" class="x12m">`.
+`gridcell` is not in `ACTIONABLE`, so the days simply were not there.
+
+**And adding the selector would not have been enough**, which is the more useful half:
+those cells carry NO date identity — no `aria-label`, no `data-date`, just the text
+`15`. The picker also shows adjacent months, so `1`, `2` and `3` each appear TWICE on
+screen at once. A recorded click would be `name="15", tag="td"`: position wearing
+identity's clothes, exactly the `ui-id-N` trap from invariant #12, and `resolve()`
+would report `GUESS name+tag (2 candidates)`.
+
+So invariant #9 (type dates, never click calendar days) is not a workaround — it is
+the correct design, and this is the evidence for it. If a read-only date field ever
+forces the picker, the fix is NOT a new selector: it is computing a real name for the
+cell the way `gridInfo()` does for data grids — read "September 2026" from the picker
+header and name the cell "15 September 2026". A feature, not a one-liner. Note the
+Redwood (`oj-*`) date components are different markup and are labelled properly; this
+lesson is about the older ADF picker.
+
+### 2. The perceive JavaScript is PYTHON-ESCAPED before the browser sees it
+The JS lives inside a Python string, so `\n`, `\t` and `\` are interpreted by Python
+FIRST. Writing `\n` inside a `//` comment (to illustrate what a bad name looked like)
+inserted a real newline, ended the comment early, and left the rest of the sentence
+sitting in the middle of the JS as code:
+
+    Page.evaluate: SyntaxError: Unexpected identifier 'to'
+
+Python's own syntax check passes happily — it is a perfectly valid string. The error
+only appears in the browser, at runtime, on every perceive.
+
+Use a raw string, or simply never write a backslash escape inside that JS — including
+in comments.
+
+### The check that catches both
+`perceive()` can be exercised headless against a `page.set_content()` fixture in about
+two seconds, no Oracle login required: assert it returns elements at all (proves the JS
+parsed) and assert the names of a few known elements (proves the naming tiers). Both
+bugs above shipped because the change was verified by READING rather than RUNNING.
+
+### A `<select>`'s innerText is not its name
+Naming tier 7 (`el.innerText`) is skipped for `<select>`, whose innerText is every
+`<option>` concatenated — `test9` / `test10` recorded a 60-line "name" that no
+name+tag lookup could ever match and that buried the healer's prompt in noise. An
+unlabelled `<select>` now falls back to its HTML `name` attribute, and if it has none
+it is named `dropdown` — a placeholder like `text field`, because an element with no
+name is DROPPED, and a dropped element never gets an index and cannot be clicked at
+all. Only `<select>` is excluded: `<li role="option">` still names itself from
+innerText, which is how Oracle's own dropdown options are found.

@@ -904,18 +904,27 @@ def index():
 # MAIN
 # ============================================================
 
+# This project's OWN port. Every automation project on this machine used to run
+# its dashboard on 5000, so they fought over it and whichever launched last won —
+# the launcher would then open localhost:5000 and show a DIFFERENT project's
+# dashboard, with no error anywhere (pythonw.exe has no console, so the "address
+# already in use" message goes nowhere). A unique port means they can all run at
+# the same time and never collide.
+# Change it here and in launch_dashboard.vbs — those two must agree.
+PORT = 5001
+
 if __name__ == "__main__":
 
     print("=" * 60)
     print(" UI AI AUTOMATION")
     print("=" * 60)
-    print(" Backend:   http://localhost:5000")
+    print(f" Backend:   http://localhost:{PORT}")
     print(" React dev: http://localhost:5173")
     print("=" * 60)
 
     app.run(
         host="0.0.0.0",
-        port=5000,
+        port=PORT,
         debug=False,
         threaded=True
     )

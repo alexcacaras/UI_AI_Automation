@@ -5,3 +5,11 @@ __pycache__/
 # Recordings hold real employee data (names, person numbers, assignment ids).
 # Deliberately NOT committed until that is decided — see CLAUDE.md known items.
 recordings/
+
+# --- local job data: real user accounts, same reason as recordings/ ---
+data/
+recordings/_bcpc_setup.json
+recordings/_bcpc_body.json
+
+# One-off job runner — becomes its own project, do not commit here.
+bcpc_run.py

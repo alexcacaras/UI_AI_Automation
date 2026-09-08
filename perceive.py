@@ -69,8 +69,24 @@ def perceive(page):
                     if (best) name = best;
                 }
 
-                // 7. last resort: the element's own visible text
-                if (!name) name = el.innerText || '';
+                // 7. last resort: the element's own visible text.
+                // NOT for <select>: its innerText is every <option> concatenated
+                // ("Acknowledgments" + "Bill to" + "Bills of lading" + ...), one
+                // per line — the element's CONTENTS, not its name. Steps then carry a
+                // 60-line "name" that no name+tag lookup can ever match and that
+                // buries the healer's prompt in noise (see test9 / test10).
+                // Only <select> is excluded — an <li role="option"> still gets its
+                // name from innerText, which is how Oracle's own dropdown options
+                // (BCPC_TRUSTEES and friends) are found.
+                if (!name && el.tagName.toLowerCase() === 'select') {
+                    // A real label was already tried above. Fall back to the HTML
+                    // name attribute, never to the selected option — the selected
+                    // option is STATE, and recording state as identity is the bug
+                    // that made a category step call itself "DEFAULT".
+                    name = el.getAttribute('name') || '';
+                } else if (!name) {
+                    name = el.innerText || '';
+                }
 
                 return name.trim();
             }
@@ -166,6 +182,17 @@ def perceive(page):
                         const role = el.getAttribute('role') || '';
                         if (tag === 'input' || tag === 'textarea' || role === 'textbox' || role === 'combobox') {
                             name = 'text field';
+                        } else if (tag === 'select') {
+                            // A <select> with no label and no name attribute. It
+                            // USED to fall back to its own innerText, which named
+                            // it after every option it contains — useless as a
+                            // locator. Now that that is gone it would drop out of
+                            // the list entirely, and an element that is not in the
+                            // list never gets a data-ai-index, so it cannot be
+                            // clicked at all. A placeholder keeps it reachable,
+                            // exactly like 'text field' above; its id is what
+                            // resolve() will actually match on.
+                            name = 'dropdown';
                         } else {
                             return;
                         }

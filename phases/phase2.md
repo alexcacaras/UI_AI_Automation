@@ -77,9 +77,14 @@ text-matching, no ambiguity: an index points at exactly one stamped element.
    index (or `press Enter` to take the top match). Seen live: typing "Kamaria"
    produced a dozen `role=option` results, `press Enter` selected the top one.
 
-5. **Comboboxes open by typing or `ArrowDown`, never by hunting the visual arrow.**
-   The decorative arrow is `role=generic`, unnamed, and correctly filtered out. The
-   real control is the `role=combobox` input — operate it the keyboard way.
+5. **Comboboxes open by typing, `ArrowDown`, or a REAL click on the input —
+   never by hunting the visual arrow.** The decorative arrow is `role=generic`,
+   unnamed, and correctly filtered out. The real control is the `role=combobox`
+   input. Typing and `ArrowDown` were the Phase 2 answers; a trusted Playwright
+   click on the input itself was later proven to work too (Security Console →
+   Edit User → User Category), which matters for REPLAY, where the recorded step
+   is a click and there is no decider to choose a keyboard route instead.
+   See "focus() is not a click" below.
 
 6. **Every action is crash-proof.** All actions run inside `try/except`; a bad
    command or a failed click prints the error and the loop continues. Unknown
@@ -106,6 +111,52 @@ text-matching, no ambiguity: an index points at exactly one stamped element.
 - **Commands only exist if you write the `elif`.** Typing `wait` did nothing until
   the `wait` branch was added. The loop's vocabulary IS the set of branches you
   write — a core mental model for the whole tool.
+
+---
+
+## `focus()` is not a click (found 2026-09-04, cost a live run)
+
+`actions.click()` used to route EVERY `input` / `textarea` / `select` to
+`locator.focus()`, with the comment "focus dodges the hint-overlay intercept".
+True for text fields, and silently wrong for everything else:
+
+- `focus()` on a checkbox does not tick it.
+- `focus()` on an `input role="combobox"` does not open it.
+
+Neither raises. The step reports success, the run goes green, and NOTHING
+HAPPENED. It surfaced on a bulk job: the User Category dropdown never opened, so
+the `BCPC_TRUSTEES` option was never in the DOM, the next step failed five
+retries, and the healer was asked which element on the page was an option that
+did not exist.
+
+**The rule now:** `focus()` only where focus IS the interaction — a text field
+you are about to type into. Everything else gets a real click, wrapped in
+try/except that falls back to `focus()` and SAYS SO, so the intercept the
+original comment was guarding against still has an escape hatch.
+
+### The devtools trap that nearly sent this the wrong way
+
+Checked in the console on the live page first (DevTools-first, as it should be):
+
+```js
+el.focus();   // nothing opens - correct, this is what replay did
+el.click();   // ALSO nothing opens
+```
+
+That reads as "clicking doesn't work either, ADF must need something else."
+It is a false negative. **`el.click()` in the console is not what Playwright
+does.** It fires ONE synthetic `click` event: no `pointerdown`, no `mousedown`,
+no coordinates, `isTrusted: false`. Playwright's `locator.click()` drives a
+virtual mouse and fires the whole trusted sequence — and ADF opens its LOV
+popups on **`mousedown`**. So the console can prove a click WORKS, but it can
+never prove one FAILS. When the two disagree, believe Playwright.
+
+Same underlying fact as invariant #13 (grid cells need a trusted click to leave
+'navigation' mode). Two different symptoms, one cause: synthetic input is not
+input.
+
+Also worth carrying: `dispatchEvent()` returning `true` means no listener called
+`preventDefault()`. It is not a signal that anything happened.
 
 ---
 
