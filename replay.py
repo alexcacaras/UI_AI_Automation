@@ -103,7 +103,13 @@ def _check_against_baseline(good, current):
     """
     if current["step_index"] == 0:
         return False
-    diff = baseline.compare(good["elements"], current["elements"])
+    # ignore_dates: across two runs a rolling window has legitimately advanced -
+    # a time card page that says 08/25-09/08 today says 08/26-09/09 tomorrow,
+    # and warning about it daily is how a check gets ignored. Level 1 must NOT
+    # do this (see baseline.compare): within a run, dates moving is the evidence
+    # a step worked.
+    diff = baseline.compare(good["elements"], current["elements"],
+                            ignore_dates=True)
     if diff["overlap"] >= MIN_OVERLAP:
         return False
 

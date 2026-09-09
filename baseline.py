@@ -103,13 +103,55 @@ def fingerprint(elements):
     return sorted([i, n, c] for (i, n), c in counts.items())
 
 
-def _as_counts(triples):
-    """[[id, name, count], ...] -> {(id, name): count}."""
-    return {(i, n): c for i, n, c in triples}
+# Date shapes that appear in Oracle element names. Kept deliberately narrow —
+# anything vaguer starts blurring real differences.
+#   08/26/2026, 8/26/26, 26-08-2026   (both orders; the recording convention is
+#                                      dd/mm/yy, invariant #9, but pages render
+#                                      mm/dd/yyyy)
+#   2026-09-09                        (ISO)
+#   Oct-26, Dec-2026                  (Oracle accounting period)
+_DATE = re.compile(
+    r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b"
+    r"|\b\d{4}-\d{1,2}-\d{1,2}\b"
+    r"|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[-\s]\d{2,4}\b"
+)
 
 
-def compare(before, after):
+def _undate(name):
+    """'Date Range 08/26/2026 - 09/09/2026' -> 'Date Range <date> - <date>'."""
+    return _DATE.sub("<date>", name)
+
+
+def _as_counts(triples, ignore_dates=False):
+    """[[id, name, count], ...] -> {(id, name): count}.
+
+    With ignore_dates, names are compared with their dates blanked, so a page
+    whose rolling window advanced overnight still matches itself.
+    """
+    counts = {}
+    for i, n, c in triples:
+        key = (i, _undate(n) if ignore_dates else n)
+        counts[key] = counts.get(key, 0) + c
+    return counts
+
+
+def compare(before, after, ignore_dates=False):
     """Difference between two fingerprints, in both directions.
+
+    IGNORE_DATES IS OPT-IN, AND MUST STAY THAT WAY
+        A date changing means OPPOSITE things in the two comparisons:
+          - across runs (level 2), the rolling window advanced overnight and
+            `Date Range 08/25/2026 - 09/08/2026` became `08/26 - 09/09`. Drift,
+            and a daily false alarm if it is not ignored.
+          - within a run (level 1), the dates moved BECAUSE the step worked -
+            clicking "next pay period" changes little else on a time card. Blur
+            them there and a working step reports as a silent no-op.
+        Same data, opposite meaning, so the caller decides rather than the
+        function. Level 2 passes True; level 1 must not.
+
+        Note this only affects MATCHING. Real dates stay in the stored file, so
+        level 3 ("did the right pay period load?") can still read them back and
+        check them properly. Normalising at capture time would delete them.
 
     ONE function for two questions, deliberately:
       - level 1, within a run: before = the page a step started on, after = the
@@ -126,7 +168,8 @@ def compare(before, after):
     elements appearing or vanishing, and row counts legitimately vary between
     runs. Keeping them apart lets a caller weigh them differently.
     """
-    a, b = _as_counts(before), _as_counts(after)
+    a = _as_counts(before, ignore_dates)
+    b = _as_counts(after, ignore_dates)
     added = sorted(k for k in b if k not in a)
     removed = sorted(k for k in a if k not in b)
     recount = sorted((k, a[k], b[k]) for k in a if k in b and a[k] != b[k])
