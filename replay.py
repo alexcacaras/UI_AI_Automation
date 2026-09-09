@@ -109,9 +109,16 @@ def _check_against_baseline(good, current):
 
     where = (f"step {current['step_index']} ({current['action']} "
              f"{current['step_name']})")
+    # THE SIZES ARE IN THE MESSAGE BECAUSE THE PERCENTAGE LIED ONCE.
+    # `overlap` counts each DISTINCT (id, name) once, however many copies of it
+    # are on the page. A Team Time Cards page whose 6 new pairs accounted for
+    # ~103 of its 126 elements (a date picker's duplicated cells) scored 76%
+    # "the same" against a 24-element baseline. The percentage said "minor"; the
+    # element counts said "this is five times the page". Print both.
     print(f"   {where} does not match the known-good run: "
           f"{diff['overlap']:.0f}% of the page is the same "
-          f"(+{len(diff['added'])} new, -{len(diff['removed'])} missing)")
+          f"(+{len(diff['added'])} new, -{len(diff['removed'])} missing; "
+          f"{good['count']} elements then, {current['count']} now)")
     # Only claim "same page, different data" when the evidence supports it:
     # every difference is an element that HAS an id present on both sides, and
     # the disagreement is over its name. That is a row showing different data.
@@ -458,17 +465,36 @@ def replay(page, name):
         # of ZERO elements on test_broken — the one capture added specifically
         # because the last action goes unwatched was the least reliable one in
         # the file. A page still rendering is not a result.
+        # SETTLED MEANS THE COUNT STOPPED MOVING, not "more than 6 elements".
+        # The magic number was far too low and it cost a whole baseline: the
+        # Team Time Cards page perceived at 24 elements while only its shell had
+        # rendered, sailed past the > 6 bar on the first try, and was blessed as
+        # the known-good picture. The full page is 126. Every later run then
+        # warned against a photograph of a half-loaded page, and the only reason
+        # it was caught is that a human watched the run and said "that passed
+        # fine". Two perceives agreeing is real evidence; one number is not.
         final = []
-        for attempt in range(5):
+        previous = -1
+        for attempt in range(6):
             page.wait_for_timeout(2000)
             try:
-                final = perceive(page)
+                current_els = perceive(page)
             except Exception as e:
                 print(f"   final perceive failed, retrying: {e}")
                 continue
-            if len(final) > 6:
+            final = current_els          # keep the best we have, settled or not
+            if len(final) > 6 and len(final) == previous:
                 break
-            print(f"   final page looks empty ({len(final)} elements), waiting...")
+            if len(final) <= 6:
+                print(f"   final page looks empty ({len(final)} elements), waiting...")
+            elif previous >= 0:
+                print(f"   final page still settling ({previous} -> "
+                      f"{len(final)} elements), waiting...")
+            previous = len(final)
+        else:
+            if final:
+                print(f"   final page never stopped changing ({len(final)} "
+                      f"elements) - capturing it anyway, treat it with suspicion")
         if final:
             last = baseline.observe(final)
             # THE LAST STEP IS THE ONE WORTH CHECKING MOST. On a recording that
@@ -486,7 +512,7 @@ def replay(page, name):
                     mismatches.append(len(recording))
             states.append(last)
         else:
-            print("   final page never settled — baseline not captured")
+            print("   final page never settled - baseline not captured")
             states = []
 
     if SCREENSHOTS and shots:
@@ -510,12 +536,38 @@ def replay(page, name):
         # two captures of the same recording are the only way to learn which
         # fields are genuinely stable across runs.
         baseline.save_last_run(name, states, goal)
-        if baseline.exists(name):
-            print(f"   baseline already recorded for '{name}' — kept; this run "
-                  f"saved to {baseline.last_run_path(name)}")
-        else:
+
+        # WHEN A RUN MAY REDEFINE "GOOD". Only when the comparison actually ran
+        # and had nothing to say, and no step needed healing.
+        #
+        # quiet_steps is deliberately NOT part of this. A step changing nothing
+        # is a statement about the ACTION; a baseline is about WHERE the run
+        # was. test_broken's Search step is silent on every good run because its
+        # query returns no rows, and letting that block refreshes forever would
+        # be the wrong lesson to draw from it.
+        #
+        # Healing is excluded because of the Redwood case study: four heals, all
+        # correct, and nothing in the system knew it. A healed run can still be
+        # blessed — by a human, through bless.py, having looked at it.
+        why_not = []
+        if good_states is None:
+            why_not.append("no usable baseline to compare against")
+        if mismatches:
+            why_not.append(f"{len(mismatches)} step(s) did not match")
+        if total_heals:
+            why_not.append(f"{total_heals} step(s) needed the healer")
+
+        if not baseline.exists(name):
             path = baseline.save(name, states, goal)
             print(f"   baseline captured: {len(states)} page states -> {path}")
+        elif not why_not:
+            baseline.save(name, states, goal)
+            print(f"   baseline refreshed from this verified run "
+                  f"(previous kept as {name}.previous.json)")
+        else:
+            print(f"   baseline NOT refreshed: {'; '.join(why_not)}")
+            print(f"   if you watched this run and it was right, accept it "
+                  f"with:  py bless.py {name}")
 
     if mismatches:
         # Also not a failure, and for a sharper reason than level 1: on a

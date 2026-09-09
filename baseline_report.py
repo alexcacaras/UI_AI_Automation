@@ -1,11 +1,11 @@
-"""Read a captured baseline and report which steps DID something — offline.
+"""Read a captured baseline and report which steps DID something - offline.
 
     py baseline_report.py test_broken
     py baseline_report.py test_broken --last-run     (the unblessed capture)
     py baseline_report.py test_broken -v             (show what changed)
 
 WHY THIS IS A SCRIPT AND NOT A CHECK INSIDE replay
-    This is level 1 — "did the action do anything?" — and it is NOT ready to
+    This is level 1 - "did the action do anything?" - and it is NOT ready to
     decide whether a run passes. Two things are already known to make it fire on
     a perfectly good run:
 
@@ -23,14 +23,14 @@ WHY THIS IS A SCRIPT AND NOT A CHECK INSIDE replay
 HOW TO READ IT
     A capture holds one page state per step plus one after the last step, and
     each state is the page as it was BEFORE its step ran. So the effect of step
-    N is the difference between state N and state N+1 — which is why the report
+    N is the difference between state N and state N+1 - which is why the report
     is indexed by step, not by state.
 """
 import sys
 import baseline
 
-# Steps whose "no change" is EXPECTED, and why. These are not exemptions — the
-# report still prints the finding — they are the explanation printed beside it,
+# Steps whose "no change" is EXPECTED, and why. These are not exemptions - the
+# report still prints the finding - they are the explanation printed beside it,
 # so a real no-op is not lost in a column of known-harmless ones.
 EXPECTED_QUIET = {
     # ASCII only. PowerShell's console is cp1252 here, and an em-dash prints as
@@ -51,7 +51,7 @@ def report(name, which="baseline", verbose=False):
     fmt = data.get("format", 1)
     if fmt != baseline.FORMAT:
         print(f"WARNING: capture is format {fmt}, this code expects "
-              f"{baseline.FORMAT} — recapture before trusting these numbers")
+              f"{baseline.FORMAT} - recapture before trusting these numbers")
 
     states = data["states"]
     print(f"{name}  ({data.get('captured', '?')})  {len(states)} states, "

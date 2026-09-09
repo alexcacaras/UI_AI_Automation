@@ -596,6 +596,71 @@ Accounting` has id `..._groupNode_cash_management` and `Projects` has
 `..._groupNode_general_accounting`. The suffix is positional. Never read meaning into a
 groupNode id suffix, and never let one talk you out of a correct match.
 
+### BUILT: keeping the baseline current (2026-09-09)
+Two paths, because neither alone works.
+
+**Automatic.** `replay` refreshes the baseline after a run that passed, compared clean,
+and needed no healing. `quiet_steps` is deliberately NOT a veto — a step changing
+nothing is a statement about the ACTION, while the baseline is about WHERE the run was,
+and `test_broken`'s Search step is silent on every good run. Healing IS a veto, per the
+Redwood case study: four heals, all correct, and nothing in the system knew it.
+
+**Manual — `py bless.py <name>`.** Promotes `<name>.last-run.json` (written on every
+run) to the baseline, after printing what would change. For the cases automation cannot
+judge: Oracle changed the UI so the stored picture is not wrong but OLD, or the run
+needed the healer and a human has to say the heals were right.
+
+Not a `.env` switch, and the reason is timing rather than taste: a flag has to be set
+BEFORE a run, but "was that run any good?" can only be answered AFTER watching it. A
+pre-run switch makes you pre-commit to trusting a run you have not seen, and if it is
+ever left on, every run silently redefines "good" — the exact laundering the rule
+exists to prevent.
+
+### LESSON — "settled" means the count STOPPED MOVING, not "more than 6 elements"
+This one cost a whole baseline, and it is the best argument in this phase for a human
+watching runs.
+
+The final capture retried until it saw more than 6 elements. The Team Time Cards page
+perceives at **24 elements while only its shell has rendered**, cleared that bar on the
+first try, and was blessed as the known-good picture by first-capture-wins. The full
+page is **126**. Every later run then warned against a photograph of a half-loaded page.
+
+Nothing in the system noticed. It was caught because a human watched a run, saw the
+warning, and said "but it passed fine" — and pushing on that disagreement rather than
+explaining it away is what found it. The first diagnosis was wrong too ("we caught the
+page mid-render today"); re-running produced a byte-identical difference, which proved
+the drift was reproducible and therefore that the BASELINE was the odd one out.
+
+Fixed: perceive until the element count is the same twice in a row. Two perceives
+agreeing is evidence; one number over a threshold is not. A page that never settles is
+still captured, with a line saying to treat it with suspicion.
+
+### LESSON — the percentage lied, so print the sizes
+The same case reported `76% of the page is the same (+6 new, -1 missing)`, which reads
+as a trivial difference. It was a 24-element page against a 126-element one.
+
+`overlap` counts each DISTINCT `(id, name)` once, however many copies are on screen, so
+6 new pairs that accounted for ~103 of 126 elements (a date picker's duplicated cells)
+barely moved it. `recount` was 0, because the duplication was entirely inside the new
+pairs and not in the shared ones.
+
+The fix is NOT a count-weighted overlap. That would have caught this, but it makes the
+score sensitive to row counts — a table with 50 rows against 60 — which is the
+legitimate variance the whole design is trying not to alarm on. Instead the message now
+carries the raw element counts (`24 elements then, 126 now`), which made the same case
+obvious at a glance. Remove the noise before tuning the number.
+
+### Known, not yet fixed: dates drift daily
+The time card page shows a rolling window, so `Date Range 08/25/2026 - 09/08/2026`
+became `Date Range 08/26/2026 - 09/09/2026` overnight and the recording mismatched.
+These names are id-less, so `anonymous` fires and the message says "could be a different
+page" — technically honest, practically a daily false alarm.
+
+Normalising date-shaped text in the fingerprint (`Date Range <date> - <date>`) is the
+obvious fix and costs no verification we have, since perceive cannot read field values
+anyway. Not built yet: it was discovered at the same time as the settle bug, and fixing
+two things at once would have made it impossible to tell which one worked.
+
 ### Still true, and still the plan for level 2
 Compare STRUCTURE, not pixels — Oracle pages legitimately differ on employee names,
 timestamps and row counts. Compare against the LAST KNOWN-GOOD run, not the original
