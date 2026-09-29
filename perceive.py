@@ -121,12 +121,35 @@ def perceive(page):
                 } catch (e) { return null; }
             }
 
-            // column index -> header text, built at most once per grid per perceive
+            // column index -> {name, date}, built at most once per grid per perceive.
+            //
+            // TIME CARD HEADERS ARE THREE LEVELS DEEP, measured in DevTools on a
+            // real card rather than assumed:
+            //
+            //   index | level 0                   | level 1          | level 2
+            //   ------|---------------------------|------------------|----------
+            //     0   | 09/27/2026 - 10/10/2026   | Scheduled Hours  | Assignment
+            //     1   |                           |                  | Time Type
+            //     9   | Sunday, September 27      | 10               | Quantity
+            //    22   | Saturday, October 10      | 10               | Quantity
+            //
+            // The old version kept whichever cell it saw LAST, which is level 2 -
+            // which is why all fourteen day columns come back called "Quantity"
+            // and need the column index to tell them apart.
+            //
+            // Now both are kept. The DEEPEST level is the name (the actual field),
+            // level 0 is the date. Level 1 is scheduled hours - real data that
+            // changes between runs, so it is deliberately dropped.
+            //
+            // Written generically, not for the time card: deepest = name, level 0
+            // = date, and a grid with only one header level simply has no date.
+            // Column 0's level 0 is the PAY PERIOD itself, which falls out of the
+            // same rule for free and is what outcome verification wants to assert.
             const hdrCache = {};
-            function headerFor(gridEl, column) {
+            function headerInfo(gridEl, column) {
                 const key = gridEl.id || 'grid';
                 if (!hdrCache[key]) {
-                    const map = {};
+                    const byLevel = {};        // idx -> {level: text}
                     gridEl.querySelectorAll('.oj-datagrid-column-header-cell').forEach(h => {
                         try {
                             const c = gridEl.getContextByNode(h);
@@ -134,13 +157,29 @@ def perceive(page):
                             const idx = (c.index !== undefined) ? c.index
                                       : (c.indexes ? c.indexes.column : undefined);
                             if (idx === undefined) return;
+                            const lvl = (c.level !== undefined) ? c.level : 0;
                             const t = (h.innerText || '').trim().replace(/\\s+/g, ' ');
-                            if (t) map[idx] = t.slice(0, 40);
+                            if (!t) return;
+                            if (!byLevel[idx]) byLevel[idx] = {};
+                            byLevel[idx][lvl] = t.slice(0, 40);
                         } catch (e) {}
+                    });
+                    const map = {};
+                    Object.keys(byLevel).forEach(idx => {
+                        const levels = Object.keys(byLevel[idx])
+                                             .map(Number).sort((a, b) => a - b);
+                        const deepest = levels[levels.length - 1];
+                        map[idx] = {
+                            name: byLevel[idx][deepest],
+                            // only a date if there IS an outer level; on a
+                            // single-level grid level 0 is the name itself and
+                            // repeating it as a date would be a lie
+                            date: (levels.length > 1) ? byLevel[idx][levels[0]] : ''
+                        };
                     });
                     hdrCache[key] = map;
                 }
-                return hdrCache[key][column] || '';
+                return hdrCache[key][column] || { name: '', date: '' };
             }
 
             document.querySelectorAll('[data-ai-index]').forEach(el => el.removeAttribute('data-ai-index'));
@@ -162,6 +201,7 @@ def perceive(page):
                 //    element; ~100 cells would make that scan run ~100x a perceive
                 const g = gridInfo(el);
                 let name;
+                let gridDate = '';      // the cell's column date, if the grid has one
                 if (g) {
                     // The column index is ALWAYS included. Time card headers are
                     // multi-level (a date row above a "Quantity" row) and we only
@@ -171,10 +211,11 @@ def perceive(page):
                     // The date is deliberately NOT used: it drifts every pay period,
                     // while row/column do not. A human-readable label belongs in its
                     // own field later (Phase 6 healer), never in the matched name.
-                    const hdr = headerFor(g.gridEl, g.column);
+                    const hdr = headerInfo(g.gridEl, g.column);
+                    gridDate = hdr.date;
                     const base = 'row ' + (g.row + 1) + ', ';
-                    name = hdr ? (base + hdr + ' (col ' + g.column + ')')
-                               : (base + 'col ' + g.column);
+                    name = hdr.name ? (base + hdr.name + ' (col ' + g.column + ')')
+                                    : (base + 'col ' + g.column);
                 } else {
                     name = getName(el);
                     if (!name) {
@@ -215,12 +256,80 @@ def perceive(page):
                     name: name.slice(0, 100),
                     id: el.id || ''
                 };
+
+                // STATE, not identity. NOTHING matches on these fields - not
+                // resolve(), not did_change(), not fingerprint(), and
+                // actions.identity() copies a fixed field list into a recorded
+                // step so a value can never leak into a recording. They are
+                // captured now so a later check can ask the question perceive
+                // has never been able to answer: did that type actually land?
+                // A field holding "Smith" has always fingerprinted identically
+                // to an empty one - a blind sensor, not a quiet application.
+                //
+                // 'value' in el rather than a tag whitelist: Redwood comboboxes
+                // are <input>, but so are a dozen other things, and asking the
+                // element whether it HAS a value is more honest than
+                // maintaining a list of tags that do.
+                //
+                // aria-checked BEFORE .checked: Oracle ticks plenty of divs
+                // with role="checkbox" that have no .checked property at all,
+                // and reading only .checked would report false for a box that
+                // is visibly ticked. A silent wrong answer is worse than none.
+                const t = (el.getAttribute('type') || '').toLowerCase();
+                if (t === 'checkbox' || t === 'radio' ||
+                    el.getAttribute('role') === 'checkbox') {
+                    const aria = el.getAttribute('aria-checked');
+                    item.checked = (aria !== null) ? (aria === 'true') : !!el.checked;
+                } else if ('value' in el && typeof el.value === 'string') {
+                    // A <button> also has .value, and it is almost always the
+                    // empty string - so a bare "does it have a value" test
+                    // stamps value='' onto every button on the page. Noise
+                    // today, and noise inside the fingerprint later.
+                    //
+                    // But an EMPTY form field must still be reported: "this box
+                    // is empty" is precisely what level 1 needs to see change
+                    // when a type lands. So form fields are always captured,
+                    // empty or not, and everything else only when it actually
+                    // holds something. Found with the headless fixture, not
+                    // guessed at.
+                    const tg = el.tagName.toLowerCase();
+                    const isField = (tg === 'input' || tg === 'textarea' || tg === 'select');
+                    if (isField || el.value !== '') {
+                        // sliced like name: a textarea holding a paragraph
+                        // would otherwise bloat every element list
+                        item.value = el.value.slice(0, 100);
+                    }
+                }
+
                 if (g) {
                     // durable identity for a cell — replay resolves on these,
                     // never on the throwaway ui-id
                     item.grid = g.grid;
                     item.row = g.row;
                     item.column = g.column;
+                    // The column's DATE, kept deliberately OUT of `name`.
+                    // resolve() matches on name, so folding the date in would
+                    // break test1.json and every other grid recording - and
+                    // phase5.md is right that the date drifts every pay period
+                    // while row/column do not. Identity stays positional; this
+                    // rides alongside it, which is the "human-readable label,
+                    // separate from name" already parked in phase5.md.
+                    if (gridDate) item.col_date = gridDate;
+
+                    // THE CELL'S CONTENT. A grid cell is a <div>, so it has no
+                    // .value property and the state branch above skips it
+                    // entirely - which meant a time card typed from 10 to 8
+                    // still looked completely unchanged to perceive. Found by
+                    // running it on a real card; the headless fixture has no
+                    // grid and could never have shown it.
+                    //
+                    // Always set, even when empty: an empty cell becoming "8"
+                    // is exactly the signal, same reasoning as form fields.
+                    // This is CONTENT, not identity - `name` stays positional
+                    // (row/column), so resolve(), find_by_grid and every
+                    // existing recording are untouched.
+                    item.value = (el.innerText || '').trim()
+                                     .replace(/\\s+/g, ' ').slice(0, 100);
                     // Stamp it on the element too, so overlay.elementInfo can READ
                     // this answer instead of recomputing it. Invariant #1: one
                     // implementation means perceive and overlay cannot drift apart.

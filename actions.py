@@ -80,12 +80,21 @@ def fill_by_name(page, name, value):
 #=============================================
 
 def did_change(before, after):
-    before_sig = {(el["id"], el["name"]) for el in before}
-    after_sig  = {(el["id"], el["name"]) for el in after}
-    if before_sig == after_sig:
-        return "no change"
-    else:
-        return "changed"
+    """SUPERSEDED by baseline.describe_change - kept as a thin wrapper.
+
+    This used to build its own {(id, name)} sets, which meant the codebase had
+    TWO definitions of "did anything change": this one and baseline.compare.
+    They had already drifted (compare counts duplicates, this did not), and
+    baseline.py's own docstring claimed there was only one. Now there is:
+    everything goes through the fingerprint, and this just flattens the answer
+    back to the old two-value shape for any caller that still wants it.
+
+    Imported inside the function because actions.py is the low-level module and
+    baseline sits above it; a module-level import would invert that.
+    """
+    import baseline
+    return ("no change" if baseline.describe_change(before, after) == "no change"
+            else "changed")
     
 def search_element(elements, target):
     for el in elements:

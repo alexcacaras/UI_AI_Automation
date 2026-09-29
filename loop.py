@@ -1,5 +1,6 @@
 from perceive import perceive
-from actions import click, fill_by_name, did_change, do_click, do_type_python, do_type_live, scroll
+from actions import click, fill_by_name, do_click, do_type_python, do_type_live, scroll
+from baseline import describe_change
 from llm import ask_llm
 from actions import search_element, select_option_forgiving
 import json
@@ -53,17 +54,30 @@ def run_loop(page, mode, name, goal, interactive=True):
         for el in elements:
             print(el)
         if previous_elements is not None and history:
-            verdict = did_change(previous_elements, elements)
+            verdict = describe_change(previous_elements, elements)
             if history[-1]["result"] == "pending":
                 history[-1]["result"] = verdict
             if pending_step is not None:
                 if pending_step["action"] == "click":
                     # Grid cells bypass the gate. Clicking one only flips it to
-                    # edit mode — same id, same name, no new elements — so
-                    # did_change reports "no change" and the step gets dropped.
-                    # Same reasoning as invariant #7 for overlay clicks: a typed
+                    # edit mode — same id, same name, no new elements — so the
+                    # verdict is "no change" and the step gets dropped. Same
+                    # reasoning as invariant #7 for overlay clicks: a typed
                     # "click 19" is deliberate, there is no intent to infer.
-                    if verdict == "changed" or "grid" in pending_step:
+                    #
+                    # NOT `verdict == "changed"` any more. describe_change
+                    # returns a SENTENCE now ("changed: 'Active' now [x]"), and
+                    # an exact string match against the old word would have
+                    # gone false for every click and silently stopped recording
+                    # anything. Ask whether it is unchanged, not whether it
+                    # equals one particular word.
+                    #
+                    # This also widens what gets kept, correctly: a click that
+                    # only ticks a checkbox used to fingerprint as "no change"
+                    # and be DROPPED from the recording. That is the authoring
+                    # half of the same silent-no-op family as the focus()
+                    # checkbox bug in phase2.md.
+                    if verdict != "no change" or "grid" in pending_step:
                         recording.append(pending_step)
                 elif pending_step["action"] == "press":
                     recording.append(pending_step)

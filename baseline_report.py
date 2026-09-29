@@ -35,7 +35,9 @@ import baseline
 EXPECTED_QUIET = {
     # ASCII only. PowerShell's console is cp1252 here, and an em-dash prints as
     # a replacement character in the middle of the explanation.
-    "type": "perceive cannot see typed values - blind, not quiet",
+    #
+    # `type` was here until FORMAT 3. perceive now reports contents, so a type
+    # that changes nothing is a real finding rather than a blind sensor.
     "scroll": "scrolling changes what is on screen, not what exists",
     "wait": "a wait is not supposed to do anything",
 }
@@ -66,19 +68,25 @@ def report(name, which="baseline", verbose=False):
 
         if diff["same"]:
             note = EXPECTED_QUIET.get(action, "")
+            if not note and step.get("is_grid") and action == "click":
+                note = "clicking a grid cell only opens edit mode"
             quiet.append((i, action, step["step_name"], note))
             print(f"{label} NO CHANGE" + (f"   ({note})" if note else "   <-- ?"))
         else:
             print(f"{label} changed  +{len(diff['added']):<3} "
                   f"-{len(diff['removed']):<3} ~{len(diff['recount']):<3} "
+                  f"={len(diff['revalued']):<3} "
                   f"overlap {diff['overlap']:5.1f}%")
             if verbose:
                 for key in diff["added"][:6]:
-                    print(f"        + {key[0] or '(no id)'} | {key[1][:50]}")
+                    print(f"        + {key[0] or '(no id)'} | {key[1][:40]} {key[2][:20]}")
                 for key in diff["removed"][:6]:
-                    print(f"        - {key[0] or '(no id)'} | {key[1][:50]}")
+                    print(f"        - {key[0] or '(no id)'} | {key[1][:40]} {key[2][:20]}")
                 for key, was, now in diff["recount"][:6]:
                     print(f"        ~ {key[1][:40]}  {was} -> {now}")
+                # FORMAT 3. The column that answers "did the typing land?".
+                for el_id, nm, was, now in diff["revalued"][:6]:
+                    print(f"        = {nm[:40]}  {was} -> {now}")
 
     unexplained = [q for q in quiet if not q[3]]
     print(f"\n{len(quiet)} of {len(states) - 1} steps changed nothing; "

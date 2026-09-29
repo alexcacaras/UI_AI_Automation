@@ -53,11 +53,19 @@ import time
 RECORDINGS = "recordings"
 BASELINES = os.path.join(RECORDINGS, "baselines")
 
-# 1 = [id, name] pairs. 2 = [id, name, count] triples.
-FORMAT = 2
+# 1 = [id, name] pairs.
+# 2 = [id, name, count] triples.
+# 3 = [id, name, state, count] quads - state is the element's CONTENTS.
+FORMAT = 3
 
 # The jQuery counter. Not an identity — a sequence number that restarts.
 _THROWAWAY_ID = re.compile(r"^ui-id-\d+$")
+
+# A perceived data-grid cell, recognised by the name perceive gives it:
+# "row 1, Quantity (col 9)" or "row 1, col 9". Parsing a name is normally a
+# smell, but perceive OWNS this format (it builds it in one place), so the two
+# cannot drift the way a guess about someone else's markup would.
+_CELL_NAME = re.compile(r"^row \d+, .*col \d+")
 
 
 def _is_cell(el):
@@ -97,10 +105,33 @@ def fingerprint(elements):
         el_id = (el.get("id") or "").strip()
         if _is_cell(el) or _THROWAWAY_ID.match(el_id):
             el_id = ""          # keep the cell, drop its throwaway id
-        key = (el_id, name)
+        key = (el_id, name, _state(el))
         counts[key] = counts.get(key, 0) + 1
     # JSON has no tuples: lists round-trip and stay readable.
-    return sorted([i, n, c] for (i, n), c in counts.items())
+    return sorted([i, n, s, c] for (i, n, s), c in counts.items())
+
+
+def _state(el):
+    """An element's CONTENTS, as a short string. '' when it has none.
+
+    FORMAT 3. perceive used to report only what an element WAS, never what it
+    HELD, so a field containing "Smith" fingerprinted identically to an empty
+    one and a successful type looked exactly like a no-op. That was a blind
+    sensor, not a quiet application, and it is why `type` was exempt from the
+    level 1 warning and why AI mode retyped fields it had already filled.
+
+    Kept as one short string rather than separate fields because it goes in the
+    KEY: an element whose contents changed is a different entry, so level 1's
+    existing "did anything move?" question answers itself with no new logic.
+
+    The [x] / [ ] shape rather than True/False so a human reading the JSON can
+    see at a glance which boxes were ticked.
+    """
+    if "checked" in el:
+        return "[x]" if el["checked"] else "[ ]"
+    if "value" in el:
+        return "=" + str(el["value"])
+    return ""
 
 
 # Date shapes that appear in Oracle element names. Kept deliberately narrow —
@@ -122,21 +153,51 @@ def _undate(name):
     return _DATE.sub("<date>", name)
 
 
-def _as_counts(triples, ignore_dates=False):
-    """[[id, name, count], ...] -> {(id, name): count}.
+def _as_counts(rows, ignore_dates=False, ignore_values=False):
+    """[[id, name, state, count], ...] -> {(id, name, state): count}.
 
-    With ignore_dates, names are compared with their dates blanked, so a page
-    whose rolling window advanced overnight still matches itself.
+    With ignore_dates, names AND states are compared with their dates blanked,
+    so a page whose rolling window advanced overnight still matches itself.
+    State too, not just name: invariant #9 says dates are TYPED, so a date
+    drifts inside a field's value exactly as it does inside a column header.
+
+    With ignore_values, state is dropped entirely - see compare().
     """
     counts = {}
-    for i, n, c in triples:
-        key = (i, _undate(n) if ignore_dates else n)
+    for row in rows:
+        # Tolerate a format-2 triple. replay refuses a stale baseline before it
+        # ever reaches here, but compare() is also called on fresh captures from
+        # two different code paths, and silently reading a count as a state
+        # would be the kind of wrong that looks like data.
+        if len(row) == 4:
+            i, n, s, c = row
+        else:
+            i, n, c = row
+            s = ""
+        if ignore_values:
+            s = ""
+        elif ignore_dates:
+            s = _undate(s)
+        key = (i, _undate(n) if ignore_dates else n, s)
         counts[key] = counts.get(key, 0) + c
     return counts
 
 
-def compare(before, after, ignore_dates=False):
+def compare(before, after, ignore_dates=False, ignore_values=False):
     """Difference between two fingerprints, in both directions.
+
+    IGNORE_VALUES IS OPT-IN FOR THE SAME REASON IGNORE_DATES IS
+        An element's CONTENTS mean opposite things in the two comparisons:
+          - within a run (level 1), a value changing is the whole point. It is
+            the evidence the type landed - the thing perceive was blind to
+            until FORMAT 3, and the reason `type` was exempt from the warning.
+          - across runs (level 2), contents legitimately differ every time. A
+            time card holds different hours, a results page different people.
+            Compare them and every run alarms, which is precisely the daily
+            false alarm ignore_dates exists to stop.
+        Level 2 passes True; level 1 must not. Level 3 does not use this path
+        at all - it reads the stored states directly, which is why they are
+        kept in the file rather than normalised away at capture time.
 
     IGNORE_DATES IS OPT-IN, AND MUST STAY THAT WAY
         A date changing means OPPOSITE things in the two comparisons:
@@ -168,8 +229,8 @@ def compare(before, after, ignore_dates=False):
     elements appearing or vanishing, and row counts legitimately vary between
     runs. Keeping them apart lets a caller weigh them differently.
     """
-    a = _as_counts(before, ignore_dates)
-    b = _as_counts(after, ignore_dates)
+    a = _as_counts(before, ignore_dates, ignore_values)
+    b = _as_counts(after, ignore_dates, ignore_values)
     added = sorted(k for k in b if k not in a)
     removed = sorted(k for k in a if k not in b)
     recount = sorted((k, a[k], b[k]) for k in a if k in b and a[k] != b[k])
@@ -185,18 +246,42 @@ def compare(before, after, ignore_dates=False):
     # None, not 100, when neither side has a single id — an Oracle page can be
     # almost entirely id-less, and inventing a perfect score for "no evidence"
     # is how a check quietly stops checking.
-    ids_a = {i for i, _ in a if i}
-    ids_b = {i for i, _ in b if i}
+    ids_a = {i for i, _, _ in a if i}
+    ids_b = {i for i, _, _ in b if i}
     id_union = len(ids_a | ids_b)
 
     # `renamed` is what DATA CHURN actually looks like: the same id carrying a
     # different name. An ADF row cell (AP1:t1:0:cl2) whose text is an employee
     # name or a journal description is the same element showing different data.
-    by_id_a = {i: n for i, n in a if i}
-    by_id_b = {i: n for i, n in b if i}
+    by_id_a = {i: n for i, n, _ in a if i}
+    by_id_b = {i: n for i, n, _ in b if i}
     renamed = sorted((i, by_id_a[i], by_id_b[i])
                      for i in set(by_id_a) & set(by_id_b)
                      if by_id_a[i] != by_id_b[i])
+
+    # REVALUED: the same element holding something different. FORMAT 3's whole
+    # point, and the direct parallel to `renamed` - that one is "the same id
+    # showing different text", this one is "the same control holding different
+    # contents". A field going from empty to "Smith", a checkbox being ticked,
+    # a time card cell going 10 -> 8.
+    #
+    # Sets rather than single values because an (id, name) pair can appear more
+    # than once on a page - fourteen empty Quantity cells share a name - so the
+    # honest answer is "these states were present before, those after".
+    #
+    # Note `same` does NOT need to consider this: state is part of the key, so
+    # anything revalued already shows up as one added plus one removed. This
+    # exists to make the REPORT readable, not to detect the change.
+    states_a, states_b = {}, {}
+    for i, n, s in a:
+        states_a.setdefault((i, n), set()).add(s)
+    for i, n, s in b:
+        states_b.setdefault((i, n), set()).add(s)
+    revalued = sorted(
+        (i, n, sorted(states_a[(i, n)]), sorted(states_b[(i, n)]))
+        for (i, n) in set(states_a) & set(states_b)
+        if states_a[(i, n)] != states_b[(i, n)]
+    )
 
     # Differences among elements with NO id are the ones nothing can explain.
     # This was learned the hard way: two different Oracle Time Management pages
@@ -205,18 +290,72 @@ def compare(before, after, ignore_dates=False):
     # chrome carried the ids. A caller must not read a high id_overlap as
     # "structure is fine" while this number is non-zero — the identified
     # elements agreeing says nothing about the ones that were never identified.
-    anonymous = sum(1 for i, _ in added if not i) + sum(1 for i, _ in removed if not i)
+    # GRID CELLS ARE NOT ANONYMOUS, and counting them as such made the warning
+    # claim the opposite of the truth. A cell has no id because fingerprint
+    # DROPS its ui-id on purpose (a jQuery counter, invariant #12) - its real
+    # identity is {grid, row, column}, which is exactly what its name encodes.
+    #
+    # It matters because a grid is VIRTUALIZED: only the columns scrolled into
+    # view exist in the DOM, and how many that is depends on window width
+    # (phase5.md - one run rendered columns 0-18, a wider window 0-22). So a
+    # whole column coming and going between two runs is the window changing,
+    # not the flow going somewhere else. Observed on test1: two runs a human
+    # watched and confirmed identical differed by all five cells of col 18,
+    # and the message said "this could be a different page".
+    cells = (sum(1 for _, n, _ in added if _CELL_NAME.match(n))
+             + sum(1 for _, n, _ in removed if _CELL_NAME.match(n)))
+    anonymous = (sum(1 for i, n, _ in added if not i and not _CELL_NAME.match(n))
+                 + sum(1 for i, n, _ in removed if not i and not _CELL_NAME.match(n)))
 
     return {
         "added": added,
         "removed": removed,
         "recount": recount,
         "renamed": renamed,
+        "revalued": revalued,
         "anonymous": anonymous,
+        "cells": cells,
         "overlap": (100.0 * len(set(a) & set(b)) / union) if union else 100.0,
         "id_overlap": (100.0 * len(ids_a & ids_b) / id_union) if id_union else None,
         "same": not (added or removed or recount),
     }
+
+
+def describe_change(before, after):
+    """What changed between two perceives, in words. For AI mode's history.
+
+    WHY THIS REPLACED A BOOLEAN
+        `actions.did_change` answered "changed" or "no change" from (id, name)
+        alone. So a successful type - the element list identical, only the
+        field's contents different - came back "no change", and AI mode's
+        history recorded a working action as a failed one. phase3.md says that
+        history exists so the model stops repeating what did not work, so the
+        model was being told to retype a field it had just filled correctly.
+        The blind sensor and the misleading history were one bug.
+
+    STRUCTURE vs CONTENTS, told apart the same way level 1 and level 2 are:
+    compare twice, once seeing values and once ignoring them. If the run with
+    values sees a difference and the run without does not, then the page is the
+    same page and something on it now holds something else - which is a
+    completely different situation from having navigated somewhere new, and the
+    old boolean could not distinguish them.
+    """
+    fa, fb = fingerprint(before), fingerprint(after)
+    full = compare(fa, fb)
+    if full["same"]:
+        return "no change"
+
+    structure = compare(fa, fb, ignore_values=True)
+    if structure["same"]:
+        if full["revalued"]:
+            _, name, was, now = full["revalued"][0]
+            more = (f" (+{len(full['revalued']) - 1} more)"
+                    if len(full["revalued"]) > 1 else "")
+            return (f"changed: {name[:40]!r} now {'/'.join(now)}, "
+                    f"was {'/'.join(was)}{more}")
+        return "changed: contents"
+    return (f"changed: page (+{len(structure['added'])} elements, "
+            f"-{len(structure['removed'])})")
 
 
 def observe(elements, step=None, step_index=None):
@@ -229,6 +368,12 @@ def observe(elements, step=None, step_index=None):
         "step_index": step_index,
         "action": step.get("action", "") if step else "(final state)",
         "step_name": (step.get("name") or step.get("value") or "") if step else "",
+        # Whether this step acted on an Oracle data-grid cell. Recorded because
+        # a CLICK on a cell only flips it to edit mode - same id, same name, no
+        # new elements - so level 1 calls it a no-op on every single grid run.
+        # loop.py already bypasses its recording gate for exactly this reason
+        # (invariant #7's sibling); replay had no way to know.
+        "is_grid": bool(step.get("grid")) if step else False,
         "count": len(elements),
         "elements": fingerprint(elements),
     }

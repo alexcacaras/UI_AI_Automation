@@ -32,13 +32,16 @@ MAX_CONSECUTIVE_HEALS = int(os.getenv("HEALER_MAX_CONSECUTIVE", "3"))
 
 # LEVEL 1 — "did the action actually do anything?". Actions whose silence is
 # already explained, so the warning stays worth reading:
-#   type   — perceive reports no VALUES, so a field holding "Smith" looks
-#            identical to an empty one. The sensor is blind, not the app quiet.
 #   scroll — changes what is on screen, not what exists.
 #   wait   — is not supposed to do anything.
-# Everything else that changes nothing gets a line. Measured on two real
-# recordings (26 steps) this fires once, so it is a signal and not noise.
-QUIET_EXPECTED = {"type", "scroll", "wait"}
+#
+# `type` USED TO BE HERE and no longer is. Its exemption existed only because
+# perceive reported no values, so a field holding "Smith" fingerprinted
+# identically to an empty one — a blind sensor, not a quiet application.
+# FORMAT 3 puts contents in the fingerprint, so a type that lands is now
+# visible and a type that silently does nothing is worth hearing about. That
+# was the whole reason the exemption was written down rather than just applied.
+QUIET_EXPECTED = {"scroll", "wait"}
 
 
 def _warn_if_no_change(before, after):
@@ -63,6 +66,15 @@ def _warn_if_no_change(before, after):
     So this WARNS and never fails a run.
     """
     if before["action"] in QUIET_EXPECTED:
+        return False
+    # A CLICK ON A GRID CELL only puts it into edit mode: same id, same name, no
+    # new elements. loop.py:60 already bypasses the recording gate for this,
+    # with the same reasoning as invariant #7 - so this is a known-silent action,
+    # not a quiet application. Measured on test1: it fired on steps 2 and 5 of a
+    # run that demonstrably worked (the card went from 10 to 8). Two false
+    # positives on every grid run is how a warning teaches you to ignore it.
+    # .get() because baselines captured before this field existed lack it.
+    if before["action"] == "click" and before.get("is_grid"):
         return False
     if not baseline.compare(before["elements"], after["elements"])["same"]:
         return False
@@ -108,8 +120,13 @@ def _check_against_baseline(good, current):
     # and warning about it daily is how a check gets ignored. Level 1 must NOT
     # do this (see baseline.compare): within a run, dates moving is the evidence
     # a step worked.
+    # ignore_values for the same reason as ignore_dates: across two runs the
+    # CONTENTS of a page legitimately differ every time - different hours on a
+    # time card, a different employee in the results. Comparing them would
+    # alarm on every run. Level 1 must NOT ignore them (see baseline.compare):
+    # within a run, contents changing is the evidence a step worked.
     diff = baseline.compare(good["elements"], current["elements"],
-                            ignore_dates=True)
+                            ignore_dates=True, ignore_values=True)
     if diff["overlap"] >= MIN_OVERLAP:
         return False
 
@@ -144,6 +161,16 @@ def _check_against_baseline(good, current):
         print(f"      {diff['anonymous']} of the differences are elements with "
               f"no id, so nothing identifies them - this could be a different "
               f"page, not just different data")
+    # Said SEPARATELY, and never as the reassuring branch. A grid renders only
+    # the columns currently scrolled into view, so a whole column appearing or
+    # vanishing between two runs is the window width changing, not the flow
+    # going somewhere else (phase5.md virtualization). Naming that is what
+    # stops a human chasing a page difference that is not there - which is
+    # exactly what happened on test1 before this line existed.
+    if diff["cells"]:
+        print(f"      {diff['cells']} of them are data-grid cells, which exist "
+              f"only while scrolled into view - a column coming and going is "
+              f"usually window width, not a different page")
     return True
 
 def replay(page, name):

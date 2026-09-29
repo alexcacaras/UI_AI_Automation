@@ -13,3 +13,6 @@ recordings/_bcpc_body.json
 
 # One-off job runner — becomes its own project, do not commit here.
 bcpc_run.py
+
+# .env backups (created when swapping pods) - same secrets as .env itself
+.env.backup*
