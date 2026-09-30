@@ -722,3 +722,239 @@ be compared to anything.
 - Credentials in recordings: AI-mode login run saved a plaintext password into the goal
   string. Confirms login must be a deterministic block reading ${creds} from .env, NOT a
   recorded flow. (Delete any test recording that captured a real password.)
+---
+
+# LEVEL 3 — BUILT (2026-09-30). And what perceive had to become first.
+
+All four levels now exist. Levels 1 and 2 compare two OBSERVATIONS to each
+other; level 3 is the first check that compares the recording's INTENT against
+the page's RESULT.
+
+    0. every step found an element
+    1. each action DID something
+    2. the flow ended on the right page
+    3. the right outcome for the right record   <- BUILT
+
+## The unlock: perceive reports what elements HOLD, not just what they are
+
+The doc above says level 3 "needs perceive to change first, and that's the real
+work". That was right. perceive returned index/tag/role/name/id and nothing
+else, so a field holding "Smith" fingerprinted IDENTICALLY to an empty one.
+
+That one gap caused three separate symptoms which turned out to be one bug:
+
+  - level 1 could not see a type land, so `type` was EXEMPT from its warning;
+  - AI mode's history recorded a successful type as "no change", so the model
+    retyped a field it had just filled correctly (the parked issue at the
+    bottom of this file);
+  - level 3 could not exist at all.
+
+What perceive now reports:
+
+  - `value` on anything that has one. Test is `'value' in el`, not a tag
+    whitelist: Redwood comboboxes are `<input>` but so are a dozen other
+    things, and asking the element is more honest than maintaining a list.
+  - `checked`, reading **aria-checked BEFORE .checked**. Oracle ticks divs with
+    role="checkbox" that have no .checked property at all, and reading only
+    .checked reports false for a box that is visibly ticked. A silent wrong
+    answer is worse than no answer.
+  - grid cells report their CONTENTS. A cell is a `<div>` with no .value, so
+    the branch above skipped it entirely and a time card typed from 10 to 8
+    still looked unchanged. **Found by running it on a real card — the headless
+    fixture has no grid and could never have shown it.**
+  - `col_date` on grid cells (below).
+
+A `<button>` also has .value, almost always empty, so a bare "has a value" test
+stamped value='' onto every button on the page. Form fields are always captured
+even when empty (an empty box is exactly what level 1 needs to see change);
+everything else only when it actually holds something.
+
+## TIME CARD HEADERS ARE THREE LEVELS DEEP — measured, not assumed
+
+`getContextByNode` on a column header returns `{axis, index, level}`:
+
+    index | level 0                   | level 1          | level 2
+    ------|---------------------------|------------------|------------
+      0   | 09/27/2026 - 10/10/2026   | Scheduled Hours  | Assignment
+      1   |                           |                  | Time Type
+      9   | Sunday, September 27      | 10               | Quantity
+     22   | Saturday, October 10      | 10               | Quantity
+
+`headerFor` kept whichever cell it saw LAST, which is level 2 — which is why
+all fourteen day columns come back called "Quantity" and need the column index
+to tell them apart. It is now `headerInfo` and keeps every level: DEEPEST is
+the name, level 0 is the date, level 1 (scheduled hours) is real data that
+changes and is deliberately dropped.
+
+The date rides on the cell as **`col_date`, deliberately NOT in `name`**.
+resolve() matches on name, so folding it in would break test1.json and every
+other grid recording — and phase5.md is right that the date drifts every pay
+period while row/column do not. Identity stays positional; the label rides
+alongside. This is the "human-readable label field, separate from name" that
+phase5.md already had parked.
+
+Written generically (deepest = name, level 0 = date, a single-level grid has no
+date), so **column 0's level 0 is the pay period itself** and falls out for
+free. That is the field the original level 3 case wanted.
+
+## FORMAT 3 — the fingerprint carries state
+
+    1: [id, name]            2: [id, name, count]
+    3: [id, name, state, count]        state = "=10" / "[x]" / "[ ]"
+
+State is in the KEY, so level 1's existing "did anything move?" answers itself
+with no new logic. `compare()` gained `revalued`, the parallel to `renamed`:
+same control, different contents.
+
+**`ignore_values` is opt-in, for exactly the reason `ignore_dates` is.** Within
+a run, a value changing is the evidence the step worked. Across runs, contents
+legitimately differ every time — a time card holds different hours, a results
+page different people — and comparing them alarms daily. Level 2 passes True,
+level 1 must not, level 3 reads the stored states directly. Two instances of
+the same rule now, which suggests it is the right shape and not a one-off.
+
+Bumping FORMAT invalidates every stored baseline; replay refuses them and says
+to recapture. That is the safety catch working. The old ones were moved to
+`recordings/baselines/format2_archive/` rather than deleted.
+
+## ONE definition of "did anything change", at last
+
+`actions.did_change` built its own {(id, name)} sets while `baseline.compare`
+built triples with counts. baseline.py's docstring claimed there was one
+definition; there were two, and they had already drifted. `did_change` is now a
+thin wrapper over `baseline.describe_change`, which returns a SENTENCE:
+
+    changed: 'Search' now =san, was =        <- contents changed
+    changed: page (+63 elements, -11)        <- navigated somewhere new
+    no change
+
+Told apart by comparing twice, once with values and once without — the same
+mechanism level 1 and level 2 use. The old boolean could not distinguish them,
+and they call for completely different next actions.
+
+**The trap when you do this:** `loop.py` gated recording on
+`verdict == "changed"`, an exact string match. A sentence compares false, and
+every click would have silently stopped being recorded. It is now
+`verdict != "no change"`. That also widens what authoring keeps, correctly: a
+click that only ticks a checkbox used to fingerprint as unchanged and be
+DROPPED — the authoring half of the focus()-checkbox family in phase2.md.
+
+## LEVEL 3 ITSELF — `_check_value_landed`
+
+For every `type` step: does what it asked for appear anywhere on the next
+captured page? Three decisions, each from a measured case:
+
+  - **Searches the whole page, not the element typed into.** On test1 the final
+    capture caught the Quantity cell mid-edit, so the CELL read empty while the
+    search-select input INSIDE it held "=8". The value had landed perfectly.
+    Pinning to one element would have failed a run that worked.
+  - **Names as well as contents.** Type a person's name into a search and it
+    comes back as a result ROW whose name is that text.
+  - **Case-insensitive substring, never equality.** You type "regula", Oracle
+    resolves it to "Regular", and phase5.md's typing-speed lesson means partial
+    typing is the DESIGNED behaviour there.
+
+**Known gap, documented rather than hidden:** invariant #9 types dates as
+dd/mm/yy while Oracle renders mm/dd/yyyy, so a typed date will not match and
+level 3 warns. `baseline._undate` could normalise both sides; that is a later
+decision. Guessing at date formats to silence a warning is how a check quietly
+stops checking. It is also why level 3 is NOT a veto on refreshing the
+baseline — same reasoning as quiet_steps.
+
+## LESSON — grid cells are not anonymous, and the message said they were
+
+test1 warned on all seven steps: "92% of the page is the same ... 6 of the
+differences are elements with no id, so nothing identifies them — this could be
+a different page". A human had watched both runs and said they were identical.
+
+They were. `baseline_diff.py` (written for this) named the six: five were one
+entire grid COLUMN, the sixth a button that comes and goes with unsaved
+changes. **Grid virtualization** — only the columns scrolled into view exist in
+the DOM, and how many that is depends on window width (phase5.md).
+
+The bug was in `anonymous`, which counted id-less elements as unidentified. A
+cell has no id because fingerprint DROPS its ui-id on purpose (invariant #12);
+its identity IS its position, which its name encodes. `compare()` now counts
+`cells` separately and the message says virtualization instead of implying a
+wrong page.
+
+Same shape as the earlier id_overlap lesson: **a check that explains itself
+wrongly sends you chasing the wrong thing, which is as costly as no message.**
+And the same method found it both times — a human watched a run, disagreed with
+the tool, and the disagreement was pushed on rather than explained away.
+
+## STEP 5 — read-only text: MEASURED, NOT INTEGRATED
+
+`perceive_readable()` exists and works. Nothing consumes it yet, deliberately.
+
+It is a **separate function**, and that is load-bearing. perceive() stamps
+data-ai-index as it goes and everything downstream addresses elements by it. A
+status message is not clickable so it must never get one — but in the same list
+`resolve()` could still match it on name+tag, and replay would then call
+`click(page, el["index"])` on an element with no index. A step that works today
+would start raising KeyError. `perceive_probe.py` asserts the channels never
+mix.
+
+Selector kept narrow, every entry justified: role=status/alert, aria-live (what
+the PAGE marks as an announcement — the application labelled it, we did not
+infer it), ADF's `::emptyTxt`, Redwood's oj-messages.
+
+MEASURED on three real pages before integrating:
+
+    Manage Journals (empty search)  3   <- includes "No results found."
+    Time card                       1   <- the TEST banner, role=alert
+    Home                            6   <- and 4 of those are NOISE
+
+"No results found." is `<div role="cell" aria-live="polite"
+id="..._ATp:t1::emptyTxt">`. It HAS an id and a live region, which was better
+than expected — status text is identifiable, not another anonymous element.
+
+**Home is why this is not wired in.** Two real defects: an infolet CONTAINER
+that happens to be aria-live is not a status ("Things to Finish Assigned to Me
+0 Created by Me 1..."), and it arrives TWICE because the dedupe key includes
+the id while a live region usually wraps the element it announces. Both need
+narrowing, and folding this into the fingerprint costs a FORMAT bump plus a
+recapture of every baseline. Measured and documented beats integrated and
+untuned.
+
+## TIER 3 — the prerequisite is settled, the tier is not built
+
+`vision_probe.py` answers "can a model read a dense Oracle page?" in ten
+minutes, against the 82 real screenshots already on disk from the BCPC job.
+
+**gemma4:e4b advertises vision and silently drops every image.**
+`prompt_eval_count` came back 314 — text only — and the model answered
+confidently that no screenshot had been provided. Exactly the shape of lesson 1
+above: no error, and the failure looks like a weak model rather than a missing
+input. prompt_eval_count is the tell, again.
+
+Cause: that model was imported from a local blob rather than pulled (the
+official name is gemma3n:e4b) and its template is a bare `{{ .Prompt }}` with
+no image handling. The capability line describes the ARCHITECTURE, the same way
+it advertises 131072 context while num_ctx allocates 4096.
+
+**qwen2.5vl:7b reads it correctly** — page title, the top-right buttons in
+visual order, and "XXClaire.Moglove" out of small grey text, which is the
+hardest thing on that page and exactly the did-I-land-on-the-right-record
+evidence Tier 3 wants. 169s per call: fine for a tier that only fires after the
+text healer returns -1, unacceptable anywhere near the hot path. It therefore
+needs its OWN setting (HEALER_VISION_MODEL) — swapping HEALER_MODEL wholesale
+would put a three-minute model in front of every ordinary heal.
+
+Note lesson 3 says do not reach for a bigger model. That was about TEXT
+matching and it was right. Reading small grey text off a 1920-wide screenshot
+is closer to OCR, and the same lesson says the real ceiling is information, not
+intelligence.
+
+## Tools added (all offline, seconds per iteration — same reason test_heal.py exists)
+
+    perceive_probe.py  headless fixture. BOTH perceive bugs in phase1.md
+                       shipped because the change was verified by READING
+                       rather than RUNNING. Also asserts the two channels
+                       never mix.
+    baseline_probe.py  the FORMAT 3 and level 3 decisions, executable
+    baseline_diff.py   WHICH elements differ from the baseline. Turned
+                       "7 steps did not match" into "one virtualized column"
+    check_values.py    watch values / col_date / readable text on a live page
+                       without recording anything
+    vision_probe.py    can a model see an Oracle screenshot
