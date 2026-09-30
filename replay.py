@@ -8,6 +8,7 @@ from report import build_doc
 from llm import heal_step
 from writeback import plan_repair, describe_repair, apply_repairs
 import baseline
+import variables
 from dotenv import load_dotenv
 load_dotenv()
 SCREENSHOTS = os.getenv("SCREENSHOTS", "off").lower() == "on"
@@ -222,7 +223,7 @@ def _check_against_baseline(good, current):
               f"usually window width, not a different page")
     return True
 
-def replay(page, name):
+def replay(page, name, interactive=True):
     path = f"recordings/{name}.json"
     while not os.path.exists(path):
         print(f"no recording named '{name}' in recordings/")
@@ -246,6 +247,20 @@ def replay(page, name):
     else:
         recording = data          # old bare-array recording
         goal = ""
+
+    # VARIABLES. Resolved ONCE, before the browser is touched, so a missing
+    # value is a prompt on a still page rather than a prompt halfway through a
+    # flow with a half-filled Oracle form open behind it.
+    #
+    # Substitution happens at USE, never into the step dict: write-back would
+    # eventually persist a substituted value and silently un-parameterise the
+    # recording, turning ${employee} back into one frozen person's name.
+    var_values, var_missing = variables.resolve(name, recording, interactive)
+    if var_missing:
+        print(f"   no value for {', '.join(var_missing)} - those steps will "
+              f"type the placeholder as-is, which is deliberate: an empty "
+              f"required field fails confusingly three steps later, a visible "
+              f"${{name}} shows the cause in the screenshot")
 
     shots = []                                        # just image paths, in order
     if SCREENSHOTS:
@@ -427,6 +442,9 @@ def replay(page, name):
             if action == "click":
                 click(page, el["index"])
             else:  # type
+                # ${name} -> today's value. Resolved here, not written into the
+                # step, so write-back can never freeze it back to a literal.
+                typed_value = variables.substitute(step["value"], var_values)
                 loc = page.locator(f'[data-ai-index="{el["index"]}"]')
                 if is_grid:
                     # A grid cell needs a trusted CLICK to reach edit mode; focus()
@@ -437,12 +455,12 @@ def replay(page, name):
                     page.wait_for_timeout(500)
                     if step.get("mode") == "replace":
                         loc.press("Control+A")
-                    page.keyboard.type(step["value"], delay=120)
+                    page.keyboard.type(typed_value, delay=120)
                 else:
                     loc.focus()
                     if step.get("mode") == "replace":
                         loc.press("Control+A")     # select-all so type() overwrites
-                    page.keyboard.type(step["value"])
+                    page.keyboard.type(typed_value)
                 if step["enter"]:
                     if is_grid:
                         wait_for_lov_options(page)   # never Enter into an empty list
@@ -451,7 +469,8 @@ def replay(page, name):
                     page.keyboard.press("Enter")
 
         elif action == "fill":
-            fill_by_name(page, step["name"], step["value"])
+            fill_by_name(page, step["name"],
+                         variables.substitute(step["value"], var_values))
 
         elif action == "press":
             page.keyboard.press(step["value"])
@@ -527,7 +546,8 @@ def replay(page, name):
                     print(f"   NOT repaired: {rank} is a guess, not an "
                           f"identification — this step needs scoping or a re-record")
 
-            select_option_forgiving(page, el["index"], step["value"])
+            select_option_forgiving(page, el["index"],
+                                    variables.substitute(step["value"], var_values))
 
         if SCREENSHOTS:                                           
                 page.wait_for_timeout(500)

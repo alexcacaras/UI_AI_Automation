@@ -284,7 +284,12 @@ def automation_thread():
 
                         ok = replay(
                             page,
-                            test_name
+                            test_name,
+                            # NEVER prompt from the web thread. Variables ask
+                            # for missing values on the terminal; phase7.md's
+                            # whole interactive flag exists because an input()
+                            # here hangs the automation thread with no way out.
+                            interactive=False
                         )
 
                         result = "PASS" if ok else "FAIL"
@@ -358,7 +363,8 @@ def automation_thread():
 
                     ok = replay(
                         page,
-                        current_name
+                        current_name,
+                        interactive=False      # see the note above
                     )
 
                     state["busy"] = False

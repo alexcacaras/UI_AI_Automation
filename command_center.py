@@ -134,6 +134,31 @@ def _run_window():
 
     tk.Frame(body, bg="#313244", height=1).pack(fill="x", padx=16, pady=(10, 6))
 
+    # ---- variables ------------------------------------------------------
+    # Turns the value you JUST recorded into ${name}, so the recording stops
+    # being frozen to the day it was made. Deliberately after the fact rather
+    # than a new seal key: a seal key means editing the overlay keydown
+    # listener (invariant #6, and the source of several phase4.md bugs), while
+    # rewriting a step already safely in the recording is pure Python.
+    tk.Label(body, text="name for the value just typed", bg=BG, fg="#94a3b8",
+             font=("Segoe UI", 8)).pack(pady=(4, 2))
+    var_entry = tk.Entry(body, width=26, bg=FIELD, fg="white",
+                         insertbackground="white", relief="flat",
+                         font=("Segoe UI", 10))
+    var_entry.pack(pady=(0, 4), ipady=4)
+
+    def make_variable():
+        name = var_entry.get().strip()
+        if name:
+            command_queue.put(f"variable {name}")
+            var_entry.delete(0, "end")
+
+    tk.Button(body, text="{ }  MAKE VARIABLE", command=make_variable,
+              bg="#7c3aed", fg="white", font=("Segoe UI", 10, "bold"),
+              relief="flat", width=24, height=2, cursor="hand2").pack(pady=(0, 6))
+
+    tk.Frame(body, bg="#313244", height=1).pack(fill="x", padx=16, pady=(10, 6))
+
     # ---- navigate -------------------------------------------------------
     nav_entry = tk.Entry(body, width=26, bg=FIELD, fg="white",
                          insertbackground="white", relief="flat", font=("Segoe UI", 10))

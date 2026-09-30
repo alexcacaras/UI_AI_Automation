@@ -222,6 +222,31 @@ def run_loop(page, mode, name, goal, interactive=True):
                     page.keyboard.press(key)
                 pending_step = {"action": "press", "value": key}
 
+            elif cmd.startswith("variable "):
+                # Rewrite the value of the step JUST recorded into ${name}, so
+                # the recording stops being frozen to the day it was made.
+                #
+                # recording[-1] is correct in BOTH modes, which is worth
+                # knowing. Overlay commits a sealed type immediately
+                # (invariant #7), and manual commits its pending_step at the
+                # TOP of the next iteration - which has already happened by the
+                # time you are reading this prompt. Either way the type is in.
+                #
+                # This is a meta-command: it edits the recording, it is not a
+                # step, and nothing is appended.
+                var_name = cmd.split(maxsplit=1)[1].strip()
+                if not recording:
+                    print("nothing recorded yet to turn into a variable")
+                elif "value" not in recording[-1]:
+                    print(f"the last recorded step is a "
+                          f"{recording[-1].get('action')} - it has no value to "
+                          f"parameterise. Record the type first, then name it.")
+                else:
+                    was = recording[-1]["value"]
+                    recording[-1]["value"] = "${" + var_name + "}"
+                    print(f"   step {len(recording)}: {was!r} -> "
+                          f"{recording[-1]['value']}")
+
             elif cmd == "wait":
                 page.wait_for_timeout(3000)
                 recording.append({"action": "wait"})
