@@ -14,7 +14,7 @@ import os
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 
-from perceive import perceive
+from perceive import perceive, perceive_readable
 
 load_dotenv()
 BASE_URL = os.getenv("BASE_URL", "")
@@ -42,6 +42,28 @@ def show(elements):
         print("   (none - are you on a page with form fields?)")
 
 
+def show_readable(items):
+    """STEP 5, measurement only - nothing consumes this yet.
+
+    The number matters as much as the content. If a page yields 3 lines this is
+    cheap and worth folding into the fingerprint; if it yields 200 the selector
+    is too loose and needs narrowing BEFORE anything depends on it. phase1.md's
+    lesson: bare oj- matched 2,185 elements and meant nothing.
+    """
+    print(f"\n{len(items)} readable (non-clickable) messages:")
+    for it in items:
+        tags = []
+        if it["role"]:
+            tags.append(f"role={it['role']}")
+        if it["live"]:
+            tags.append(f"live={it['live']}")
+        if it["id"]:
+            tags.append(f"id={it['id'][-40:]}")
+        print(f"   {it['text'][:70]!r}   {'  '.join(tags)}")
+    if not items:
+        print("   (none on this page)")
+
+
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=False, args=["--start-maximized"])
     page = browser.new_page(no_viewport=True)
@@ -51,6 +73,7 @@ with sync_playwright() as p:
     while True:
         try:
             show(perceive(page))
+            show_readable(perceive_readable(page))
         except Exception as e:
             print(f"perceive failed: {e}")
         if input("\nEnter to re-perceive, or 'q' to quit: ").strip().lower() == "q":

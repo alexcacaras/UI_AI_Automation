@@ -374,6 +374,12 @@ def observe(elements, step=None, step_index=None):
         # loop.py already bypasses its recording gate for exactly this reason
         # (invariant #7's sibling); replay had no way to know.
         "is_grid": bool(step.get("grid")) if step else False,
+        # LEVEL 3. What this step ASKED FOR, kept beside what the page ended up
+        # holding. The recording knows the intent and the capture knows the
+        # result; storing both in one file is what lets "did the value I asked
+        # for actually land?" be answered offline, not just live.
+        "typed": (step.get("value", "") or "")
+                 if step and step.get("action") == "type" else "",
         "count": len(elements),
         "elements": fingerprint(elements),
     }

@@ -345,6 +345,86 @@ def perceive(page):
         return elements
 
 
+def perceive_readable(page):
+    """What the page SAYS about itself - text you cannot click or type into.
+
+    WHY THIS IS A SEPARATE FUNCTION AND NOT MORE OF `ACTIONABLE`
+        perceive() stamps data-ai-index as it goes, and everything downstream
+        addresses elements by that index. A status message is not clickable, so
+        it must never get one - but if it sat in the same list, resolve() could
+        still match it on name+tag and replay would then do
+        click(page, el["index"]) on an element that has no index. A step that
+        works today would start raising KeyError. Separate channel, separate
+        list: indices, overlay badges, resolve() and the healer prompt are all
+        exactly as they were.
+
+    WHAT IT EXISTS FOR
+        `test_broken` step 7 searches Manage Journals and gets nothing back.
+        The click WORKED, the query ran, it returned an empty set - and the
+        fingerprint was identical either way, so "the action did nothing" and
+        "the action did something that produced nothing" were the same picture.
+        Oracle was saying "No results found." on screen the whole time.
+
+    THE SELECTOR IS NARROW ON PURPOSE, and every entry was measured in DevTools
+    rather than guessed (phase1.md: bare oj- matched 2,185 elements and meant
+    nothing):
+      - role=status / role=alert   the standard ARIA "I am announcing
+                                   something" roles
+      - aria-live                  what the page itself marks as an
+                                   announcement. "No results found." sits in a
+                                   polite live region, which is the most
+                                   honest signal available: the application
+                                   labelled it, we did not infer it.
+      - id ending emptyTxt         the ADF empty-table message. Observed as
+                                   ..._ATp:t1::emptyTxt on Manage Journals; the
+                                   suffix is an ADF convention, not a one-off.
+      - oj-messages / summary      Redwood's message boxes.
+
+    Short text only. A live region can wrap a large container, and collecting a
+    whole page of prose would swamp the fingerprint with something that is not
+    a status at all.
+    """
+    return page.evaluate("""
+        () => {
+            const READABLE = '[role="status"],[role="alert"],[aria-live="polite"],'
+                           + '[aria-live="assertive"],[id$="emptyTxt"],'
+                           + '.oj-messages,.oj-message-summary';
+
+            function isVisible(el) {
+                const s = getComputedStyle(el);
+                const r = el.getBoundingClientRect();
+                return s.display !== 'none' && s.visibility !== 'hidden' &&
+                       r.width > 0 && r.height > 0;
+            }
+
+            const seen = new Set();
+            const out = [];
+            document.querySelectorAll(READABLE).forEach(el => {
+                if (!isVisible(el)) return;
+                const text = (el.innerText || '').trim().replace(/\\s+/g, ' ');
+                // 200 chars: a status message is a sentence. Anything longer is
+                // a container that happens to be live, not an announcement.
+                if (!text || text.length > 200) return;
+                // A live region often wraps the very element it announces, so
+                // the same sentence arrives twice. Key on both so a page CAN
+                // legitimately say the same thing in two places.
+                const key = (el.id || '') + '|' + text;
+                if (seen.has(key)) return;
+                seen.add(key);
+                out.push({
+                    text: text,
+                    id: el.id || '',
+                    role: el.getAttribute('role') || '',
+                    live: el.getAttribute('aria-live') ||
+                          (el.closest('[aria-live]')
+                             ? el.closest('[aria-live]').getAttribute('aria-live') : '')
+                });
+            });
+            return out;
+        }
+    """)
+
+
 
     
 

@@ -84,6 +84,55 @@ def _warn_if_no_change(before, after):
     return True
 
 
+def _check_value_landed(before, after):
+    """LEVEL 3 — did the value this step asked for actually end up on the page?
+
+    THE DIFFERENCE FROM LEVEL 1, which is the whole point of a third level:
+        level 1 asks "did anything change?". A type that fires, moves the page
+        and leaves the WRONG value passes that question comfortably. This asks
+        "did what I asked for actually land?" - the right outcome, not just an
+        outcome. It is the first check in this project that compares the
+        recording's INTENT against the page's RESULT rather than comparing two
+        observations to each other.
+
+    SEARCHES THE WHOLE PAGE, not the element that was typed into.
+        Measured on test1: the final capture caught the Quantity cell mid-edit,
+        so the CELL read empty while the search-select input inside it held
+        "=8". The value had landed perfectly. Pinning the check to one element
+        would have failed a run that worked.
+
+    NAMES AS WELL AS CONTENTS, for the same reason: type a person's name into a
+    search and it comes back as a result ROW, whose name is that text. The
+    question is "is what I asked for on the page", and a rendered row is on the
+    page.
+
+    CASE-INSENSITIVE SUBSTRING, never equality. You type "regula" and Oracle's
+    search-select resolves it to "Regular". Equality would fail every
+    search-select in the project - and phase5.md's typing-speed lesson means
+    partial typing is the DESIGNED behaviour there, not sloppiness.
+
+    KNOWN GAP, stated rather than papered over: invariant #9 says dates are
+    TYPED, in dd/mm/yy, while Oracle renders mm/dd/yyyy. So a typed date will
+    not substring-match what appears and this will warn. baseline._undate
+    exists and could normalise both sides; that is a deliberate later decision,
+    not an oversight. Guessing at date formats to silence a warning is how a
+    check quietly stops checking.
+
+    WARNS, never fails - the same rule levels 1 and 2 earn their keep under.
+    """
+    wanted = (before.get("typed") or "").strip()
+    if not wanted:
+        return False
+    needle = wanted.lower()
+    for _, name, state, _ in after["elements"]:
+        if needle in (state or "").lower() or needle in (name or "").lower():
+            return False
+    print(f"   step {before['step_index']} typed {wanted!r} into "
+          f"{before['step_name']!r}, but nothing on the next page holds it - "
+          f"the step ran, the value did not land")
+    return True
+
+
 # LEVEL 2 — "is this the page the good run was on?". Two independent good runs
 # of the same recording matched at 100% on every interior step, zero elements
 # added or missing, so a strict threshold is affordable. It is a threshold and
@@ -217,6 +266,7 @@ def replay(page, name):
     states = []
     quiet_steps = []             # steps that left the page exactly as they found it
     mismatches = []              # steps that did not match the known-good run
+    lost_values = []             # steps whose typed value never appeared (level 3)
 
     # LEVEL 2. Load the blessed baseline, but only USE it if it still describes
     # this recording. A capture is tied to the step list it was taken from, so a
@@ -275,6 +325,11 @@ def replay(page, name):
             # settle wait on every step of every run.
             if states and _warn_if_no_change(states[-1], current):
                 quiet_steps.append(states[-1]["step_index"])
+            # LEVEL 3, on the same one-step-late footing as level 1 and for the
+            # same reason: the effect of a step is only visible on the page the
+            # NEXT step starts on.
+            if states and _check_value_landed(states[-1], current):
+                lost_values.append(states[-1]["step_index"])
             if good_states and _check_against_baseline(good_states[step_index],
                                                        current):
                 mismatches.append(step_index)
@@ -535,6 +590,11 @@ def replay(page, name):
             # done anything at all.
             if states and _warn_if_no_change(states[-1], last):
                 quiet_steps.append(states[-1]["step_index"])
+            # THE LAST STEP IS OFTEN THE TYPE THAT MATTERS. On a recording that
+            # ends by filling a field, this is the only place its value can be
+            # seen to have landed at all.
+            if states and _check_value_landed(states[-1], last):
+                lost_values.append(states[-1]["step_index"])
             if good_states:
                 # The final state is indexed by step count, not step_index -
                 # it belongs to no step. Give it that index so the message
@@ -620,6 +680,17 @@ def replay(page, name):
         print(f"run passed, but {len(quiet_steps)} step(s) changed nothing: "
               f"{', '.join(str(i) for i in quiet_steps)} - if an action there "
               f"was supposed to have an effect, this run is green for nothing")
+
+    if lost_values:
+        # LEVEL 3. Also not a failure yet, and for a reason that is documented
+        # rather than assumed: typed DATES cannot match, because invariant #9
+        # types them dd/mm/yy while Oracle renders mm/dd/yyyy. Until that is
+        # handled properly this fires on any recording that types a date, and a
+        # check that fails good runs gets switched off rather than fixed.
+        print(f"run passed, but {len(lost_values)} step(s) typed a value that "
+              f"never appeared on the page: "
+              f"{', '.join(str(i) for i in lost_values)} - the step ran and the "
+              f"value did not land")
 
     if total_heals:
         # A green run that needed healing is not the same as a green run that
